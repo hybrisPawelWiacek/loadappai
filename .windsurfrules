@@ -1,0 +1,62 @@
+# LoadApp.AI Workspace Rules
+
+## 1. Document Reference Guide
+- When implementing features or user flows → prd20.md
+- When designing component interaction or API endpoints → System_Architecture.md
+- When implementing entities, services, or business logic → Domain_Entities_and_Services.md
+- When creating or modifying API endpoints → API_Specification.md
+- When adding extension points or metadata fields → future-extensibility-requirements.md
+- When naming fields or documenting code → Glossary.md
+
+## 2. Core Development Principles
+- Follow clean architecture from System_Architecture.md
+- Implement domain model as specified in Domain_Entities_and_Services.md
+- Use REST API patterns from API_Specification.md
+- Include extension points from future-extensibility-requirements.md
+- Maintain consistent naming from Glossary.md
+
+## 3. Implementation Focus
+- Primary reference for features: prd20.md
+  - Route planning with empty driving
+  - Cost calculations 
+  - Offer generation
+  - Streamlit UI implementation
+  
+- Technical structure: System_Architecture.md
+  - Frontend (Streamlit)
+  - Backend (Flask)
+  - Database (SQLite)
+  - External services integration
+
+## 4. Code Organization
+- Follow domain patterns: Domain_Entities_and_Services.md
+  - Entity definitions and validation
+  - Service layer implementation
+  - Business logic organization
+  
+- Follow API design: API_Specification.md
+  - Endpoint structure
+  - Request/response formats
+  - Error handling
+  - Status codes
+
+## 5. Future-Proofing
+Reference future-extensibility-requirements.md for:
+- JSON metadata fields
+- Feature flags
+- Extension points
+- Database schema evolution
+
+## 6. Documentation & Naming
+Use Glossary.md for:
+- Field definitions
+- Terminology
+- Data types
+- Validation rules
+
+## 7. Implementation Process
+Reference Implementation_Analysis.md for:
+- Project phasing
+- Dependencies
+- Integration points
+- Testing strategy
