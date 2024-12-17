@@ -34,13 +34,25 @@ class RouteMetadata(BaseModel):
         frozen = True
 
 
-@dataclass(frozen=True)
-class CountrySegment:
-    """Represents a route segment within a specific country."""
+class CountrySegment(BaseModel):
+    """Value object representing a segment of the route in a specific country."""
 
-    country_code: constr(min_length=2, max_length=2)
-    distance: confloat(gt=0)
-    toll_rates: Dict[str, Decimal]
+    country_code: str = Field(description="ISO country code")
+    distance: Decimal = Field(ge=0, description="Distance in kilometers")
+    toll_rates: Dict[str, Decimal] = Field(default_factory=dict, description="Toll rates by category")
+
+    class Config:
+        """Pydantic model configuration."""
+        json_schema_extra = {
+            "example": {
+                "country_code": "DE",
+                "distance": Decimal("150.5"),
+                "toll_rates": {
+                    "highway": Decimal("25.50"),
+                    "national": Decimal("10.20")
+                }
+            }
+        }
 
 
 class CostBreakdown(BaseModel):
@@ -51,19 +63,7 @@ class CostBreakdown(BaseModel):
     driver_cost: Decimal = Field(ge=0)
     overheads: Decimal = Field(ge=0)
     cargo_specific_costs: Dict[str, Decimal] = Field(default_factory=dict)
-    total_cost: Decimal = Field(ge=0)
-
-    @computed_field
-    @property
-    def total(self) -> Decimal:
-        """Calculate total cost."""
-        return (
-            self.fuel_cost
-            + self.toll_cost
-            + self.driver_cost
-            + self.overheads
-            + sum(self.cargo_specific_costs.values())
-        )
+    total: Decimal = Field(ge=0)
 
     def __add__(self, other: "CostBreakdown") -> "CostBreakdown":
         """Add two cost breakdowns together."""
@@ -77,7 +77,7 @@ class CostBreakdown(BaseModel):
                 + other.cargo_specific_costs.get(k, Decimal("0"))
                 for k in set(self.cargo_specific_costs) | set(other.cargo_specific_costs)
             },
-            total_cost=self.total_cost + other.total_cost,
+            total=self.total + other.total,
         )
 
     class Config:
@@ -87,15 +87,12 @@ class CostBreakdown(BaseModel):
 
 
 class EmptyDriving(BaseModel):
-    """Empty driving details."""
+    """Value object representing empty driving segments."""
 
-    distance_km: confloat(ge=0) = Field(..., description="Empty driving distance in kilometers")
-    duration_hours: confloat(ge=0) = Field(..., description="Empty driving duration in hours")
+    distance_km: float = Field(description="Distance in kilometers", gt=0)
+    duration_hours: float = Field(description="Duration in hours", gt=0)
 
-    class Config:
-        """Pydantic model configuration."""
-
-        frozen = True
+    model_config = {"frozen": True}
 
 
 class Currency(BaseModel):

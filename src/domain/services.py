@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from uuid import UUID, uuid4
 
 from src.domain.entities import Route, Offer, Cost, CostSettings, TransportType, Cargo
-from src.domain.interfaces import LocationService, LocationServiceError
+from src.domain.interfaces import LocationService, LocationServiceError, AIService, AIServiceError
 from src.domain.value_objects import (
     Location,
     CountrySegment,
@@ -67,10 +67,10 @@ class RoutePlanningService:
             duration_hours = self.location_service.calculate_duration(origin, destination)
             country_segments = self.location_service.get_country_segments(origin, destination)
             
-            # Calculate empty driving (placeholder for now)
+            # Calculate empty driving (using minimal values for now)
             empty_driving = EmptyDriving(
-                distance_km=0.0,
-                duration_hours=0.0
+                distance_km=0.1,  # Minimal positive distance
+                duration_hours=0.1  # Minimal positive duration
             )
             
             # Prepare route metadata
@@ -211,7 +211,7 @@ class CostCalculationService:
                 driver_cost=driver_cost,
                 overheads=overhead_cost,
                 cargo_specific_costs=cargo_costs,
-                total_cost=base_cost + overhead_cost
+                total=base_cost + overhead_cost
             )
             
         except Exception as e:
@@ -235,7 +235,7 @@ class CostCalculationService:
             "toll": cost.toll_cost,
             "driver": cost.driver_cost,
             "overhead": cost.overheads,
-            "total": cost.total_cost
+            "total": cost.total
         }
         
         if include_details and cost.cargo_specific_costs:
@@ -328,8 +328,7 @@ class CostCalculationService:
 
 @dataclass
 class OfferGenerationService:
-    """
-    Service for generating transport offers.
+    """Service for generating transport offers.
     
     Responsibilities:
     - Generate commercial offers
@@ -337,8 +336,8 @@ class OfferGenerationService:
     - Integrate with AI for offer enhancement
     - Handle offer versioning and updates
     """
-    
     cost_service: CostCalculationService
+    ai_service: AIService
     
     def generate_offer(
         self,
@@ -365,20 +364,21 @@ class OfferGenerationService:
             
         Raises:
             ValueError: If margin is invalid or cost calculation fails
+            AIServiceError: If AI service integration fails
         """
         if not 0 <= margin <= 1:
             raise ValueError("Margin must be between 0 and 1")
-        
+
         try:
-            # Calculate costs with all available details
+            # Calculate base cost
             cost_breakdown = self.cost_service.calculate_route_cost(
                 route=route,
                 settings=settings,
                 cargo=cargo,
                 transport_type=transport_type
             )
-            
-            # Create cost record
+
+            # Create cost entity
             cost = Cost(
                 route_id=route.id,
                 breakdown=cost_breakdown,
@@ -386,34 +386,57 @@ class OfferGenerationService:
             )
 
             # Calculate final price with margin
-            margin_decimal = Decimal(str(margin))
-            final_price = cost_breakdown.total_cost * (1 + margin_decimal)
+            base_cost = cost_breakdown.total
+            final_price = base_cost * (1 + Decimal(str(margin)))
 
-            # Generate AI fun fact
+            # Generate fun fact and description using AI
             fun_fact = self._generate_fun_fact(route)
+            description = self._generate_description(route)
 
             # Create and return offer
             return Offer(
                 route_id=route.id,
                 cost_id=cost.id,
-                margin=margin_decimal,
+                base_cost=base_cost,
+                margin=Decimal(str(margin)),
                 final_price=final_price,
                 fun_fact=fun_fact,
+                description=description,
                 metadata=metadata
             )
-            
+
         except Exception as e:
             raise ValueError(f"Failed to generate offer: {str(e)}") from e
     
     def _generate_fun_fact(self, route: Route) -> str:
-        """
-        Generate a fun fact about the route using AI.
-        
-        To be integrated with OpenAI for dynamic, contextual fun facts.
-        """
-        # Placeholder implementation
-        return (
-            f"Did you know? The {route.distance_km:.1f} km journey between "
-            f"{route.origin.address} and {route.destination.address} is roughly "
-            f"equivalent to {route.distance_km / 0.1:.0f} trucks lined up bumper to bumper!"
-        )
+        """Generate a fun fact about the route using AI."""
+        try:
+            return self.ai_service.generate_route_fact(
+                origin=route.origin,
+                destination=route.destination,
+                context={
+                    "distance_km": route.distance_km,
+                    "duration_hours": route.duration_hours,
+                    "transport_type": route.transport_type,
+                    "cargo_id": route.cargo_id
+                }
+            )
+        except AIServiceError as e:
+            raise AIServiceError(f"Failed to generate fun fact: {str(e)}")
+    
+    def _generate_description(self, route: Route) -> str:
+        """Generate an enhanced description of the route using AI."""
+        try:
+            return self.ai_service.enhance_route_description(
+                origin=route.origin,
+                destination=route.destination,
+                context={
+                    "transport_type": route.transport_type,
+                    "cargo_id": route.cargo_id,
+                    "metadata": route.metadata,
+                    "distance_km": route.distance_km,
+                    "duration_hours": route.duration_hours
+                }
+            )
+        except AIServiceError as e:
+            return str(route)
