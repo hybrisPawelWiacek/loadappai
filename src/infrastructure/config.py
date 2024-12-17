@@ -25,6 +25,19 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_API_KEY: Optional[Union[SecretStr, str]] = None
     OPENAI_API_KEY: Optional[Union[SecretStr, str]] = None
 
+    # Environment
+    ENV: str = "development"
+
+    # OpenAI Configuration
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MAX_RETRIES: int = 3
+    OPENAI_RETRY_DELAY: float = 1.0
+
+    # Google Maps Configuration
+    GMAPS_MAX_RETRIES: int = 3
+    GMAPS_RETRY_DELAY: float = 1.0
+    GMAPS_CACHE_TTL: int = 3600
+
     # CrewAI Configuration (Optional)
     CREWAI_BASE_URL: Optional[str] = None
     CREWAI_BEARER_TOKEN: Optional[str] = None

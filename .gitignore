@@ -1,10 +1,51 @@
+# Database
+loadapp.db
+
+# macOS
+.DS_Store
+**/.DS_Store
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
+.python-version
+venv/
+.env
+
+# Virtual Environment
 env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment Variables
+.env
+.env.*
+!template.env
+
+# Logs
+*.log
+logs/
+log/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Distribution / packaging
+.Python
 build/
 develop-eggs/
 dist/
@@ -20,40 +61,3 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual Environment
-venv/
-ENV/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environment variables
-.env
-
-# Database
-*.db
-*.sqlite3
-
-# Logs
-*.log
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-
-# Streamlit
-.streamlit/
-
-# macOS
-.DS_Store

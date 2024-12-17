@@ -60,3 +60,45 @@ Reference Implementation_Analysis.md for:
 - Dependencies
 - Integration points
 - Testing strategy
+
+## 8. Checklist to prevent common mistakes
+Here's a checklist of best practices to prevent such mistakes:
+
+Before Creating Files:
+Search for existing implementations using find_by_name
+Check project structure using list_dir
+Review related files using related_files
+Verify correct directory using project conventions
+Project Structure Rules:
+Domain code goes in src/domain/
+API endpoints in src/api/
+Infrastructure code in src/infrastructure/
+Frontend code in src/frontend/
+File Organization Guidelines:
+Keep related code in single files when possible
+Follow the established module structure
+Use init.py for package organization
+Place tests in corresponding test directories
+Before Implementation:
+Review existing implementations
+Check for duplicate functionality
+Follow the project's architectural patterns
+Verify the correct location based on clean architecture
+
+
+## 9. Testing Best Practices
+- Always run tests with `pytest [test_file] -v` command
+- Do not use `python -m pytest` or other variations
+- Before modifying code:
+  1. Run tests to get baseline
+  2. Understand what tests are failing and why
+  3. Make changes to both implementation and tests in sync
+- When tests fail:
+  1. Check if failure is due to:
+     - Implementation changes (update tests)
+     - Test environment setup (fix mocks/fixtures)
+     - Actual bugs (fix implementation)
+  2. Update both implementation and tests together
+  3. Verify all test cases still make sense
+- Maintain test coverage above 60%
+- Keep test fixtures up to date with implementation

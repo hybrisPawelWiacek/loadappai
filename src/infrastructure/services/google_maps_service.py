@@ -1,7 +1,8 @@
 """Google Maps service implementation."""
 import os
+import time
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 from decimal import Decimal
 
 import googlemaps
@@ -10,6 +11,7 @@ from googlemaps.exceptions import ApiError, Timeout, TransportError
 from src.domain.interfaces import LocationService, LocationServiceError
 from src.domain.value_objects import Location, CountrySegment
 from src.infrastructure.services.toll_rate_service import DefaultTollRateService
+from src.config import get_settings
 
 
 class GoogleMapsService(LocationService):
@@ -20,14 +22,19 @@ class GoogleMapsService(LocationService):
         Initialize the Google Maps service.
 
         Args:
-            api_key: Optional API key. If not provided, will look for GOOGLE_MAPS_API_KEY env var.
+            api_key: Optional API key (defaults to settings.GOOGLE_MAPS_API_KEY)
 
         Raises:
-            LocationServiceError: If API key is not provided and not found in environment
+            LocationServiceError: If API key is not found in settings or environment
         """
-        self.api_key = api_key or os.environ.get('GOOGLE_MAPS_API_KEY')
+        settings = get_settings()
+        self.api_key = api_key or settings.GOOGLE_MAPS_API_KEY
         if not self.api_key:
-            raise LocationServiceError("Google Maps API key not found")
+            raise LocationServiceError("Google Maps API key not found in settings or environment")
+        
+        self.max_retries = settings.GMAPS_MAX_RETRIES
+        self.retry_delay = settings.GMAPS_RETRY_DELAY
+        self.cache_ttl = settings.GMAPS_CACHE_TTL
         
         try:
             self.client = googlemaps.Client(key=self.api_key)
@@ -36,153 +43,167 @@ class GoogleMapsService(LocationService):
         
         self.toll_rate_service = DefaultTollRateService()
 
-    @lru_cache(maxsize=1000)
+    def _make_request(self, request_func: callable, *args, **kwargs) -> Dict[str, Any]:
+        """
+        Make a request to Google Maps API with retry logic.
+        
+        Args:
+            request_func: Google Maps API function to call
+            *args: Positional arguments for the function
+            **kwargs: Keyword arguments for the function
+            
+        Returns:
+            Dict: API response
+            
+        Raises:
+            LocationServiceError: If request fails after retries
+        """
+        for attempt in range(self.max_retries):
+            try:
+                return request_func(*args, **kwargs)
+            except (ApiError, Timeout, TransportError) as e:
+                if attempt == self.max_retries - 1:
+                    raise LocationServiceError(f"Google Maps API error after {self.max_retries} retries: {str(e)}")
+                time.sleep(self.retry_delay * (attempt + 1))
+            except Exception as e:
+                raise LocationServiceError(f"Unexpected error in Google Maps request: {str(e)}")
+
+    def _get_cache_key(self, origin: Location, destination: Location) -> str:
+        """Generate a cache key for location pair."""
+        return f"{origin.latitude},{origin.longitude}|{destination.latitude},{destination.longitude}"
+
     def calculate_distance(self, origin: Location, destination: Location) -> float:
         """Calculate distance between two locations using Google Maps Distance Matrix API."""
-        try:
-            result = self.client.distance_matrix(
-                origins=[(origin.latitude, origin.longitude)],
-                destinations=[(destination.latitude, destination.longitude)],
-                mode="driving",
-                units="metric"
-            )
+        cache_key = self._get_cache_key(origin, destination)
+        if hasattr(self, '_distance_cache') and cache_key in self._distance_cache:
+            return self._distance_cache[cache_key]
 
-            if not result.get('rows'):
-                raise LocationServiceError("No route found")
+        result = self._make_request(
+            self.client.distance_matrix,
+            origins=[(origin.latitude, origin.longitude)],
+            destinations=[(destination.latitude, destination.longitude)],
+            mode="driving",
+            units="metric"
+        )
 
-            elements = result['rows'][0]['elements']
-            if not elements or elements[0].get('status') != 'OK':
-                raise LocationServiceError("Route calculation failed")
+        if not result.get('rows'):
+            raise LocationServiceError("No route found")
 
-            # Convert meters to kilometers
-            return elements[0]['distance']['value'] / 1000.0
+        elements = result['rows'][0]['elements']
+        if not elements or elements[0].get('status') != 'OK':
+            raise LocationServiceError("Route calculation failed")
 
-        except (ApiError, Timeout, TransportError) as e:
-            raise LocationServiceError(f"Google Maps API error: {str(e)}")
-        except Exception as e:
-            raise LocationServiceError(f"Unexpected error calculating distance: {str(e)}")
+        # Convert meters to kilometers
+        distance = elements[0]['distance']['value'] / 1000.0
+        
+        # Cache the result
+        if not hasattr(self, '_distance_cache'):
+            self._distance_cache = {}
+        self._distance_cache[cache_key] = distance
+        
+        return distance
 
-    @lru_cache(maxsize=1000)
     def calculate_duration(self, origin: Location, destination: Location) -> float:
         """Calculate travel duration between two locations using Google Maps Distance Matrix API."""
-        try:
-            result = self.client.distance_matrix(
-                origins=[(origin.latitude, origin.longitude)],
-                destinations=[(destination.latitude, destination.longitude)],
-                mode="driving",
-                units="metric"
-            )
+        cache_key = self._get_cache_key(origin, destination)
+        if hasattr(self, '_duration_cache') and cache_key in self._duration_cache:
+            return self._duration_cache[cache_key]
 
-            if not result.get('rows'):
-                raise LocationServiceError("No route found")
+        result = self._make_request(
+            self.client.distance_matrix,
+            origins=[(origin.latitude, origin.longitude)],
+            destinations=[(destination.latitude, destination.longitude)],
+            mode="driving",
+            units="metric"
+        )
 
-            elements = result['rows'][0]['elements']
-            if not elements or elements[0].get('status') != 'OK':
-                raise LocationServiceError("Route calculation failed")
+        if not result.get('rows'):
+            raise LocationServiceError("No route found")
 
-            # Convert seconds to hours
-            return elements[0]['duration']['value'] / 3600.0
+        elements = result['rows'][0]['elements']
+        if not elements or elements[0].get('status') != 'OK':
+            raise LocationServiceError("Route calculation failed")
 
-        except (ApiError, Timeout, TransportError) as e:
-            raise LocationServiceError(f"Google Maps API error: {str(e)}")
-        except Exception as e:
-            raise LocationServiceError(f"Unexpected error calculating duration: {str(e)}")
+        # Convert seconds to hours
+        duration = elements[0]['duration']['value'] / 3600.0
+        
+        # Cache the result
+        if not hasattr(self, '_duration_cache'):
+            self._duration_cache = {}
+        self._duration_cache[cache_key] = duration
+        
+        return duration
 
-    def get_country_segments(
-        self, origin: Location, destination: Location, transport_type: str
-    ) -> List[CountrySegment]:
+    def get_country_segments(self, origin: Location, destination: Location, transport_type: str) -> List[CountrySegment]:
         """Get country segments for a route using Google Maps Directions API."""
-        try:
-            directions = self.client.directions(
-                origin=(origin.latitude, origin.longitude),
-                destination=(destination.latitude, destination.longitude),
-                mode="driving"
+        result = self._make_request(
+            self.client.directions,
+            origin=(origin.latitude, origin.longitude),
+            destination=(destination.latitude, destination.longitude),
+            mode="driving"
+        )
+
+        if not result:
+            raise LocationServiceError("No route found")
+
+        # Process route and extract country segments
+        segments = self._extract_country_segments(result[0])
+
+        # Add toll rates to segments
+        for segment in segments:
+            toll_rates = self.toll_rate_service.calculate_segment_toll_rates(
+                segment,
+                transport_type
             )
+            segment.toll_rates = toll_rates
 
-            if not directions:
-                raise LocationServiceError("No route found")
+        return segments
 
-            segments = []
+    def _extract_country_segments(self, route: Dict[str, Any]) -> List[CountrySegment]:
+        """Extract country segments from a route."""
+        segments = []
+        current_country = None
+        current_distance = Decimal("0")
 
-            for leg in directions[0]["legs"]:
-                current_country = None
-                current_distance = 0
+        for leg in route.get('legs', [{}]):
+            for step in leg.get('steps', []):
+                country = self._get_country_from_location(step.get('end_location', {}))
+                distance = Decimal(str(step.get('distance', {}).get('value', 0))) / Decimal("1000")  # meters to km
 
-                for step in leg["steps"]:
-                    country = self._extract_country(step)
-                    distance = step["distance"]["value"] / 1000  # Convert to km
-
-                    if current_country != country:
-                        if current_country:
-                            temp_segment = CountrySegment(
-                                country_code=current_country,
-                                distance=Decimal(str(current_distance)),
-                                toll_rates={}
-                            )
-                            toll_rates = self.toll_rate_service.calculate_segment_toll_rates(
-                                temp_segment,
-                                transport_type
-                            )
-                            segments.append(
-                                CountrySegment(
-                                    country_code=current_country,
-                                    distance=Decimal(str(current_distance)),
-                                    toll_rates=toll_rates
-                                )
-                            )
-                        current_country = country
-                        current_distance = distance
-                    else:
-                        current_distance += distance
-
-                # Add the last segment
-                if current_country:
-                    temp_segment = CountrySegment(
-                        country_code=current_country,
-                        distance=Decimal(str(current_distance)),
-                        toll_rates={}
-                    )
-                    toll_rates = self.toll_rate_service.calculate_segment_toll_rates(
-                        temp_segment,
-                        transport_type
-                    )
-                    segments.append(
-                        CountrySegment(
+                if country != current_country:
+                    if current_country:
+                        segments.append(CountrySegment(
                             country_code=current_country,
-                            distance=Decimal(str(current_distance)),
-                            toll_rates=toll_rates
-                        )
-                    )
+                            distance=current_distance
+                        ))
+                    current_country = country
+                    current_distance = distance
+                else:
+                    current_distance += distance
 
-            return segments
+        # Add final segment
+        if current_country:
+            segments.append(CountrySegment(
+                country_code=current_country,
+                distance=current_distance
+            ))
 
-        except ApiError as e:
-            raise LocationServiceError(f"Google Maps API error: {str(e)}")
-        except Exception as e:
-            raise LocationServiceError(f"Failed to get country segments: {str(e)}")
+        return segments
 
-    def _extract_country(self, step: dict) -> str:
-        """
-        Extract country from a Google Maps step.
-        
-        This is a simplified implementation that estimates country based on
-        the step's end location. For more accurate results, you might want to:
-        1. Use the Routes API instead of Directions API
-        2. Implement more sophisticated country border detection
-        3. Consider using additional geospatial data sources
-        """
-        lat = step['end_location']['lat']
-        lng = step['end_location']['lng']
-        
-        try:
-            geocode_result = self.client.reverse_geocode((lat, lng))
-            if geocode_result:
-                for component in geocode_result[0]['address_components']:
-                    if 'country' in component['types']:
-                        return component['short_name']
-        except Exception:
-            # If geocoding fails, we'll skip this step
-            pass
-        
-        # If country cannot be determined, return None
-        return None
+    def _get_country_from_location(self, location: Dict[str, float]) -> str:
+        """Get country code from location using reverse geocoding."""
+        if not location:
+            return "Unknown"
+
+        result = self._make_request(
+            self.client.reverse_geocode,
+            (location.get('lat'), location.get('lng')),
+            result_type=['country']
+        )
+
+        if result and result[0].get('address_components'):
+            for component in result[0]['address_components']:
+                if 'country' in component.get('types', []):
+                    return component.get('short_name', 'Unknown')
+
+        return "Unknown"

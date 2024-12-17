@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -36,16 +36,17 @@ def test_settings():
 @pytest.fixture(scope="session")
 def engine():
     """Create a test database engine."""
-    return create_engine(
+    engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    return engine
 
 
 @pytest.fixture(scope="session")
 def tables(engine):
-    """Create all database tables."""
+    """Create all tables for testing."""
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)
@@ -55,11 +56,23 @@ def tables(engine):
 def db_session(engine, tables):
     """Create a new database session for a test."""
     connection = engine.connect()
+    # Begin a non-ORM transaction
     transaction = connection.begin()
-    session = Session(bind=connection)
+    # Bind an individual Session to the connection
+    Session = sessionmaker(bind=connection)
+    session = Session()
 
     yield session
 
+    # Rollback the transaction and close the session
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture(autouse=True)
+def cleanup_tables(db_session):
+    """Clean up tables after each test."""
+    yield
+    for table in reversed(Base.metadata.sorted_tables):
+        db_session.execute(table.delete())

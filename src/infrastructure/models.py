@@ -63,7 +63,7 @@ class CostSettings(Base):
 
     __tablename__ = "cost_settings"
 
-    id = Column(String, primary_key=True, default=generate_uuid)
+    id = Column(String, primary_key=True)  
     fuel_price_per_liter = Column(Float, nullable=False)
     driver_daily_salary = Column(Float, nullable=False)
     toll_rates = Column(JSON, nullable=False)
