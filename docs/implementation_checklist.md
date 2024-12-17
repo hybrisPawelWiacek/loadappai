@@ -102,12 +102,18 @@
     - [x] Distance calculation
     - [x] Time estimation
     - [x] Empty driving support
-  - [ ] Google Maps integration
+  - [x] Google Maps integration
+    - [x] Basic route calculations
+    - [x] Country segment detection
+    - [x] Toll rate calculations
 - [x] CostCalculationService
   - [x] Core implementation
     - [x] Fuel cost calculation
     - [x] Driver cost calculation
-    - [x] Toll cost estimation
+    - [x] Toll cost calculation
+      - [x] Per-country toll rates
+      - [x] Vehicle type consideration
+      - [x] Road type differentiation
     - [x] Transport-type specific costs
   - [x] Cost breakdown generation
   - [x] Margin calculations
@@ -168,18 +174,28 @@
     - [x] Test coverage > 90%
 
 ### External Services Integration
-- [ ] Google Maps Service (See project_knowledge/t_gmaps.md for implementation hints)
-  - [ ] Basic integration
-    - [ ] API client configuration
-    - [ ] Request/response DTOs
-    - [ ] Service interface definition
-  - [ ] Error handling
+- [x] Google Maps Service (See project_knowledge/t_gmaps.md for implementation hints)
+  - [x] Basic integration
+    - [x] API client configuration
+    - [x] Request/response DTOs
+    - [x] Service interface definition
+  - [x] Core functionality
+    - [x] Distance calculation
+    - [x] Duration estimation
+    - [x] Country segment detection
+    - [x] Toll rate integration
+  - [x] Error handling
+    - [x] API error handling
+    - [x] Location validation
+    - [x] Geocoding fallbacks
+  - [x] Tests
+    - [x] Unit tests with mocks
+    - [x] Error scenario coverage
+    - [x] Toll rate calculations
+  - [ ] Performance optimization
     - [ ] Rate limiting implementation
     - [ ] Circuit breaker pattern
     - [ ] Retry mechanisms
-  - [ ] Tests
-    - [ ] Unit tests with mocks
-    - [ ] Integration tests
     - [ ] Performance tests
 - [ ] OpenAI Service (See project_knowledge/t_openai_python.md for implementation hints)
   - [ ] Basic integration

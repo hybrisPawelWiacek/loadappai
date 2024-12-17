@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from uuid import UUID, uuid4
 
 from src.domain.entities import Route, Offer, Cost, CostSettings, TransportType, Cargo
+from src.domain.interfaces import LocationService, LocationServiceError
 from src.domain.value_objects import (
     Location,
     CountrySegment,
@@ -26,6 +27,7 @@ class RoutePlanningService:
     - Handle empty driving calculations
     - Integrate with external mapping services
     """
+    location_service: LocationService
     
     def create_route(
         self,
@@ -54,16 +56,16 @@ class RoutePlanningService:
             
         Raises:
             ValueError: If route parameters are invalid
-            RuntimeError: If external service integration fails
+            LocationServiceError: If external service integration fails
         """
         # Validate input parameters
         self._validate_route_parameters(origin, destination, pickup_time, delivery_time)
         
         try:
-            # Calculate route details (to be integrated with Google Maps)
-            distance_km = self._calculate_distance(origin, destination)
-            duration_hours = self._calculate_duration(pickup_time, delivery_time)
-            country_segments = self._get_country_segments(origin, destination)
+            # Calculate route details using location service
+            distance_km = self.location_service.calculate_distance(origin, destination)
+            duration_hours = self.location_service.calculate_duration(origin, destination)
+            country_segments = self.location_service.get_country_segments(origin, destination)
             
             # Calculate empty driving (placeholder for now)
             empty_driving = EmptyDriving(
@@ -98,8 +100,10 @@ class RoutePlanningService:
                 metadata=route_metadata
             )
             
+        except LocationServiceError as e:
+            raise ValueError(f"Failed to calculate route details: {str(e)}")
         except Exception as e:
-            raise RuntimeError(f"Failed to create route: {str(e)}") from e
+            raise RuntimeError(f"Unexpected error creating route: {str(e)}")
     
     def _validate_route_parameters(
         self,
@@ -278,12 +282,14 @@ class CostCalculationService:
         return total_distance * settings.fuel_price_per_liter
     
     def _calculate_toll_cost(self, route: Route, settings: CostSettings) -> Decimal:
-        """Calculate toll costs based on country segments."""
-        country_distances = {
-            segment.country_code: segment.distance
-            for segment in route.country_segments
-        }
-        return settings.calculate_toll_cost(country_distances)
+        """Calculate toll costs for the route."""
+        total_toll_cost = Decimal("0")
+        
+        for segment in route.country_segments:
+            segment_toll_cost = sum(segment.toll_rates.values())
+            total_toll_cost += segment_toll_cost
+
+        return total_toll_cost
     
     def _calculate_driver_cost(self, route: Route, settings: CostSettings) -> Decimal:
         """Calculate driver cost based on duration."""
