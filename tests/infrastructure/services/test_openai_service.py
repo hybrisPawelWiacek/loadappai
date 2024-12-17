@@ -52,30 +52,36 @@ def test_init_without_api_key():
 def test_init_with_api_key():
     """Test initialization with explicit API key."""
     test_key = 'test-key-1234'
-    settings = Settings(_env_file=None)  # Disable .env file loading
-    settings.OPENAI_API_KEY = None  # Ensure settings has no key
-    settings.OPENAI_MODEL = "gpt-4o-mini"  # Keep the original model name
+    settings = Settings(_env_file=None)
+    settings.OPENAI_API_KEY = None
+    settings.OPENAI_MODEL = "gpt-4o-mini"
     settings.OPENAI_MAX_RETRIES = 3
     settings.OPENAI_RETRY_DELAY = 1.0
     
+    mock_client = Mock()
     with patch.dict(os.environ, {'OPENAI_API_KEY': ''}, clear=True), \
-         patch('src.infrastructure.services.openai_service.get_settings', return_value=settings):
+         patch('src.infrastructure.services.openai_service.get_settings', return_value=settings), \
+         patch('src.infrastructure.services.openai_service.OpenAI', return_value=mock_client):
         service = OpenAIService(api_key=test_key)
         assert service.api_key == test_key
-        assert service.model == "gpt-4o-mini"  # Keep the original model name
+        assert service.model == "gpt-4o-mini"
         assert service.max_retries == 3
         assert service.retry_delay == 1.0
+        assert service.client == mock_client  # Verify we got our mock
 
 
 def test_init_with_settings(mock_settings):
     """Test initialization with settings."""
+    mock_client = Mock()
     with patch.dict(os.environ, {'OPENAI_API_KEY': ''}, clear=True), \
-         patch('src.infrastructure.services.openai_service.get_settings', return_value=mock_settings):
+         patch('src.infrastructure.services.openai_service.get_settings', return_value=mock_settings), \
+         patch('src.infrastructure.services.openai_service.OpenAI', return_value=mock_client):
         service = OpenAIService()
         assert service.api_key == mock_settings.OPENAI_API_KEY
         assert service.model == mock_settings.OPENAI_MODEL
         assert service.max_retries == mock_settings.OPENAI_MAX_RETRIES
         assert service.retry_delay == mock_settings.OPENAI_RETRY_DELAY
+        assert service.client == mock_client  # Verify we got our mock
 
 
 def test_generate_fun_fact_success(mock_settings, mock_openai_client):

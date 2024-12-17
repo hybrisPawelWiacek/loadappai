@@ -33,7 +33,10 @@ class OpenAIService(AIService):
         self.retry_delay = settings.OPENAI_RETRY_DELAY
         
         try:
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI(
+                api_key=self.api_key,
+                max_retries=self.max_retries,
+            )
         except Exception as e:
             raise AIServiceError(f"Failed to initialize OpenAI client: {str(e)}")
 
