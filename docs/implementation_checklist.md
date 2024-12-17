@@ -135,37 +135,40 @@
     - [x] CRUD operation tests
     - [x] Query performance tests
     - [x] Edge cases
-- [ ] OfferRepository
-  - [ ] CRUD operations
-    - [ ] Create with validation
-    - [ ] Read with related data
-    - [ ] Update status handling
-    - [ ] Soft delete implementation
-  - [ ] Query methods
-    - [ ] Filter by status
-    - [ ] Search functionality
-    - [ ] Date range queries
-  - [ ] Tests
-    - [ ] Basic CRUD tests
-    - [ ] Complex query tests
-    - [ ] Transaction tests
-- [ ] CostSettingsRepository
-  - [ ] CRUD operations
-    - [ ] Version-aware create
-    - [ ] Read with caching
-    - [ ] Controlled updates
-    - [ ] Audit trail
-  - [ ] Query methods
-    - [ ] Get active settings
-    - [ ] Historical queries
-    - [ ] Validation rules
-  - [ ] Tests
-    - [ ] Version control tests
-    - [ ] Cache behavior tests
-    - [ ] Concurrent access
+    - [x] Test coverage > 95%
+- [x] OfferRepository
+  - [x] CRUD operations
+    - [x] Create with validation
+    - [x] Read with related data
+    - [x] Update status handling
+    - [x] Soft delete implementation
+  - [x] Query methods
+    - [x] Filter by status
+    - [x] Search functionality
+    - [x] Date range queries
+  - [x] Tests
+    - [x] Basic CRUD tests
+    - [x] Complex query tests
+    - [x] Transaction tests
+    - [x] Test coverage > 90%
+- [x] CostSettingsRepository
+  - [x] CRUD operations
+    - [x] Version-aware create
+    - [x] Read with caching
+    - [x] Controlled updates
+    - [x] Audit trail
+  - [x] Query methods
+    - [x] Get active settings
+    - [x] Historical queries
+    - [x] Validation rules
+  - [x] Tests
+    - [x] Version control tests
+    - [x] Cache behavior tests
+    - [x] Concurrent access
+    - [x] Test coverage > 90%
 
 ### External Services Integration
-- [ ] Google Maps Service (See project_knowledge/t_gmaps.md for implementation details)
+- [ ] Google Maps Service (See project_knowledge/t_gmaps.md for implementation hints)
   - [ ] Basic integration
     - [ ] API client configuration
     - [ ] Request/response DTOs
@@ -178,7 +181,7 @@
     - [ ] Unit tests with mocks
     - [ ] Integration tests
     - [ ] Performance tests
-- [ ] OpenAI Service (See project_knowledge/t_openai_python.md for implementation details)
+- [ ] OpenAI Service (See project_knowledge/t_openai_python.md for implementation hints)
   - [ ] Basic integration
     - [ ] API client setup
     - [ ] Prompt templates

@@ -1,23 +1,33 @@
 """Application configuration."""
+import json
+import os
 from functools import lru_cache
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
-from pydantic import PostgresDsn, SecretStr
+from pydantic import PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True)
+    model_config = SettingsConfigDict(
+        env_file=os.getenv("ENV_FILE", ".env"),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+    )
 
     # Database
     DATABASE_URL: str = "sqlite:///loadapp.db"
     SQL_ECHO: bool = False
 
     # API Keys
-    GOOGLE_MAPS_API_KEY: SecretStr
-    OPENAI_API_KEY: SecretStr
+    GOOGLE_MAPS_API_KEY: Optional[Union[SecretStr, str]] = None
+    OPENAI_API_KEY: Optional[Union[SecretStr, str]] = None
+
+    # CrewAI Configuration (Optional)
+    CREWAI_BASE_URL: Optional[str] = None
+    CREWAI_BEARER_TOKEN: Optional[str] = None
 
     # Feature Flags
     WEATHER_ENABLED: bool = False
@@ -35,6 +45,14 @@ class Settings(BaseSettings):
         "DE": 0.10,
         "FR": 0.12,
     }
+
+    @field_validator("DEFAULT_TOLL_RATES", mode="before")
+    @classmethod
+    def parse_toll_rates(cls, v):
+        """Parse toll rates from string if needed."""
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
 
 @lru_cache

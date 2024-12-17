@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Dict, Optional
 
 from pydantic import BaseModel, Field, confloat, constr
+from pydantic import computed_field
 
 
 class Location(BaseModel):
@@ -43,21 +44,26 @@ class CountrySegment:
 
 
 class CostBreakdown(BaseModel):
-    """Detailed breakdown of transport costs."""
+    """Cost breakdown for a route."""
 
-    fuel_cost: Decimal = Field(..., ge=0, description="Total fuel cost")
-    toll_cost: Decimal = Field(..., ge=0, description="Total toll costs")
-    driver_cost: Decimal = Field(..., ge=0, description="Driver salary and related costs")
-    overheads: Decimal = Field(..., ge=0, description="Business overhead costs")
-    cargo_specific_costs: Dict[str, Decimal] = Field(
-        ..., description="Cargo-specific costs like cleaning, insurance"
-    )
-    total: Decimal = Field(..., ge=0, description="Total cost")
+    fuel_cost: Decimal = Field(ge=0)
+    toll_cost: Decimal = Field(ge=0)
+    driver_cost: Decimal = Field(ge=0)
+    overheads: Decimal = Field(ge=0)
+    cargo_specific_costs: Dict[str, Decimal] = Field(default_factory=dict)
+    total_cost: Decimal = Field(ge=0)
 
-    class Config:
-        """Pydantic model configuration."""
-
-        frozen = True
+    @computed_field
+    @property
+    def total(self) -> Decimal:
+        """Calculate total cost."""
+        return (
+            self.fuel_cost
+            + self.toll_cost
+            + self.driver_cost
+            + self.overheads
+            + sum(self.cargo_specific_costs.values())
+        )
 
     def __add__(self, other: "CostBreakdown") -> "CostBreakdown":
         """Add two cost breakdowns together."""
@@ -71,15 +77,20 @@ class CostBreakdown(BaseModel):
                 + other.cargo_specific_costs.get(k, Decimal("0"))
                 for k in set(self.cargo_specific_costs) | set(other.cargo_specific_costs)
             },
-            total=self.total + other.total,
+            total_cost=self.total_cost + other.total_cost,
         )
+
+    class Config:
+        """Pydantic model configuration."""
+
+        frozen = True
 
 
 class EmptyDriving(BaseModel):
     """Empty driving details."""
 
-    distance_km: confloat(gt=0) = Field(..., description="Empty driving distance in kilometers")
-    duration_hours: confloat(gt=0) = Field(..., description="Empty driving duration in hours")
+    distance_km: confloat(ge=0) = Field(..., description="Empty driving distance in kilometers")
+    duration_hours: confloat(ge=0) = Field(..., description="Empty driving duration in hours")
 
     class Config:
         """Pydantic model configuration."""

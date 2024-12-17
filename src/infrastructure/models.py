@@ -32,7 +32,7 @@ class Route(Base):
     empty_driving = Column(JSON, nullable=False)
     is_feasible = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    metadata = Column(JSON, nullable=True)
+    extra_data = Column(JSON, nullable=True)
 
     # Relationships
     offers = relationship("Offer", back_populates="route")
@@ -52,7 +52,7 @@ class Offer(Base):
     final_price = Column(Float, nullable=False)
     fun_fact = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    metadata = Column(JSON, nullable=True)
+    extra_data = Column(JSON, nullable=True)
 
     # Relationships
     route = relationship("Route", back_populates="offers")
@@ -70,7 +70,7 @@ class CostSettings(Base):
     overheads = Column(JSON, nullable=False)
     cargo_factors = Column(JSON, nullable=False)
     last_modified = Column(DateTime, nullable=False, default=datetime.utcnow)
-    metadata = Column(JSON, nullable=True)
+    extra_data = Column(JSON, nullable=True)
 
 
 class TransportType(Base):
@@ -84,7 +84,7 @@ class TransportType(Base):
     emissions_class = Column(String, nullable=False)
     fuel_consumption_empty = Column(Float, nullable=False)
     fuel_consumption_loaded = Column(Float, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    extra_data = Column(JSON, nullable=True)
 
     # Relationships
     routes = relationship("Route", back_populates="transport")
@@ -100,7 +100,7 @@ class Cargo(Base):
     value = Column(Float, nullable=False)
     special_requirements = Column(JSON, nullable=True)
     hazmat = Column(Boolean, nullable=False, default=False)
-    metadata = Column(JSON, nullable=True)
+    extra_data = Column(JSON, nullable=True)
 
     # Relationships
     routes = relationship("Route", back_populates="cargo")
