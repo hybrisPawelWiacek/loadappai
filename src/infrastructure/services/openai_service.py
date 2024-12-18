@@ -9,6 +9,7 @@ from src.domain.interfaces import AIService, AIServiceError
 from src.domain.value_objects import Location
 from src.config import get_settings
 import time
+import httpx
 
 
 class OpenAIService(AIService):
@@ -33,9 +34,11 @@ class OpenAIService(AIService):
         self.retry_delay = settings.OPENAI_RETRY_DELAY
         
         try:
+            # Initialize with a custom httpx client
+            http_client = httpx.Client(timeout=30.0)
             self.client = OpenAI(
                 api_key=self.api_key,
-                max_retries=self.max_retries,
+                http_client=http_client
             )
         except Exception as e:
             raise AIServiceError(f"Failed to initialize OpenAI client: {str(e)}")
@@ -115,26 +118,62 @@ class OpenAIService(AIService):
         return self.generate_response(prompt, temperature=0.7, max_tokens=100)
 
     def enhance_route_description(self, origin: Location, destination: Location, distance_km: float, duration_hours: float, context: Optional[Dict] = None) -> str:
-        """Generate an enhanced description of a route.
+        """Generate an enhanced description of a route with logistics-relevant information.
         
         Args:
             origin: Origin location
             destination: Destination location
             distance_km: Distance of the route in kilometers
             duration_hours: Duration of the route in hours
-            context: Optional additional context
-            
+            context: Optional additional context with keys like:
+                    - transport_type: Type of transport being used
+                    - cargo_type: Type of cargo being transported
+                    - special_requirements: Any special transport requirements
+                    
         Returns:
-            str: Enhanced route description
+            str: Enhanced route description with logistics insights
             
         Raises:
             AIServiceError: If description generation fails
         """
-        prompt = (
-            f"Describe the transport route from {origin.address} to {destination.address} "
-            f"with a distance of {distance_km:.1f} km and a duration of {duration_hours:.1f} hours, "
-            "highlighting key points of interest and transport considerations."
+        system_prompt = (
+            "You are a logistics route analyst specializing in freight transport routes. "
+            "Provide detailed route descriptions that focus on logistics-relevant information such as:"
+            "\n- Major highways and transport corridors"
+            "\n- Known traffic patterns or bottlenecks"
+            "\n- Rest stops and refueling points"
+            "\n- Border crossings if international"
+            "\n- Terrain and weather considerations"
+            "\nKeep descriptions concise but informative for transport planning."
         )
+        
+        user_prompt = (
+            f"Analyze the transport route from {origin.address} to {destination.address}.\n"
+            f"Route metrics:\n"
+            f"- Distance: {distance_km:.1f} km\n"
+            f"- Duration: {duration_hours:.1f} hours\n"
+        )
+        
         if context:
-            prompt += f"\nAdditional context: {context}"
-        return self.generate_response(prompt, temperature=0.5, max_tokens=200)
+            user_prompt += "\nAdditional context:\n"
+            for key, value in context.items():
+                user_prompt += f"- {key}: {value}\n"
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        try:
+            response = self._make_request(
+                messages,
+                temperature=0.7,  # Slightly higher for more varied descriptions
+                max_tokens=300,   # Allow longer responses
+                presence_penalty=0.6,  # Encourage covering different aspects
+                frequency_penalty=0.4   # Reduce repetition
+            )
+            return response.choices[0].message.content or ""
+        except AIServiceError as e:
+            raise AIServiceError(f"Failed to enhance route description: {str(e)}")
+        except Exception as e:
+            raise AIServiceError(f"Unexpected error in route description enhancement: {str(e)}")

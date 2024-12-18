@@ -604,3 +604,92 @@ Citations:
 [9] https://github.com/openai/openai-quickstart-python
 [10] https://www.kdnuggets.com/exploring-the-openai-api-with-python
 
+Based on the provided code and test output, I can see the issue is with the OpenAI client initialization in newer versions of the library. Let me help address this:
+
+1. **OpenAIService Fix**:
+The error occurs because the OpenAI client is trying to pass a `proxies` parameter that's no longer supported. Here's how we should modify the OpenAIService initialization:
+
+```python
+def __init__(self, api_key: Optional[str] = None):
+    """Initialize OpenAI service.
+    
+    Args:
+        api_key: Optional API key (defaults to settings.OPENAI_API_KEY)
+        
+    Raises:
+        AIServiceError: If API key is not found in settings or environment
+    """
+    settings = get_settings()
+    self.api_key = api_key or settings.OPENAI_API_KEY
+    if not self.api_key:
+        raise AIServiceError("OpenAI API key not found in settings or environment")
+    
+    self.model = settings.OPENAI_MODEL
+    self.max_retries = settings.OPENAI_MAX_RETRIES
+    self.retry_delay = settings.OPENAI_RETRY_DELAY
+    
+    try:
+        # Initialize with minimal parameters
+        self.client = OpenAI(
+            api_key=self.api_key,
+        )
+        # Set timeout and other configurations directly if needed
+        self.client.timeout = 30.0  # Optional: Set custom timeout
+    except Exception as e:
+        raise AIServiceError(f"Failed to initialize OpenAI client: {str(e)}")
+```
+
+2. **Integration Test Updates**:
+Let's modify the integration tests to include better error handling:
+
+```python
+@pytest.mark.integration
+class TestOpenAIServiceIntegration:
+    """Integration tests for OpenAIService."""
+    
+    @pytest.fixture(autouse=True)
+    def setup_and_teardown(self):
+        """Setup and teardown for integration tests."""
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            pytest.skip("OPENAI_API_KEY not set in environment")
+        # Verify API key format
+        if not api_key.startswith(('sk-', 'dummy-key-for-test')):
+            pytest.skip("Invalid OPENAI_API_KEY format")
+        yield
+
+    def test_generate_route_fact_integration(self):
+        """Integration test for route fact generation."""
+        try:
+            service = OpenAIService()
+            origin = Location(address="Berlin, Germany", latitude=52.5200, longitude=13.4050)
+            destination = Location(address="Warsaw, Poland", latitude=52.2297, longitude=21.0122)
+            result = service.generate_route_fact(origin, destination)
+            assert isinstance(result, str)
+            assert len(result) > 0
+        except AIServiceError as e:
+            pytest.fail(f"Integration test failed: {str(e)}")
+
+    def test_enhance_route_description_integration(self):
+        """Integration test for route description enhancement."""
+        try:
+            service = OpenAIService()
+            origin = Location(address="Berlin, Germany", latitude=52.5200, longitude=13.4050)
+            destination = Location(address="Warsaw, Poland", latitude=52.2297, longitude=21.0122)
+            result = service.enhance_route_description(origin, destination, 500.0, 6.5)
+            assert isinstance(result, str)
+            assert len(result) > 0
+        except AIServiceError as e:
+            pytest.fail(f"Integration test failed: {str(e)}")
+```
+
+3. **Configuration Recommendation**:
+Your config.py looks good, but let's add a pytest marker for integration tests to avoid warnings:
+
+```python
+# In pytest.ini or pyproject.toml
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests",
+]
+```

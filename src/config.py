@@ -9,6 +9,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings."""
 
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+    )
+
     # API Keys
     OPENAI_API_KEY: str = Field(default="")
     GOOGLE_MAPS_API_KEY: str = Field(default="")
@@ -25,11 +30,6 @@ class Settings(BaseSettings):
 
     # Environment
     ENV: str = Field(default="development")
-
-    class Config:
-        """Settings configuration."""
-        env_file = ".env"
-        case_sensitive = True
 
 
 @lru_cache()

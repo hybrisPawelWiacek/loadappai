@@ -1,34 +1,17 @@
 """Database configuration and session management."""
 from contextlib import contextmanager
-from typing import Generator
-
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.ext.declarative import declarative_base
 
-from src.infrastructure.config import settings
-
-# Create SQLAlchemy engine with connection pooling
-engine = create_engine(
-    settings.DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_recycle=1800,
-    echo=settings.SQL_ECHO,
-)
-
-# Create session factory
+# Create database engine
+engine = create_engine('sqlite:///:memory:', echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create declarative base for models
 Base = declarative_base()
 
-
 @contextmanager
-def get_db() -> Generator[Session, None, None]:
-    """Get database session with context management."""
+def get_db() -> Session:
+    """Provide a transactional scope around a series of operations."""
     db = SessionLocal()
     try:
         yield db
@@ -39,7 +22,6 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-
-def init_db() -> None:
-    """Initialize database schema."""
+def init_db():
+    """Initialize database with tables."""
     Base.metadata.create_all(bind=engine)
