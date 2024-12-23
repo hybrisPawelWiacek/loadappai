@@ -2,35 +2,59 @@
 LoadApp.AI Streamlit Frontend Application
 """
 import streamlit as st
-from typing import Dict, Optional
-import requests
-from decimal import Decimal
+from datetime import datetime, timezone
+from typing import List
+import structlog
 
-from src.domain.value_objects import Location
-from src.config import get_settings
-from src.frontend.components import (
-    render_route_form,
-    display_route_summary,
-    display_cost_breakdown,
-    render_cost_settings,
-    display_offer,
-    render_offer_controls,
-    display_offer_preview,
-    render_settings_management,
-    create_route_map,
-    display_route_timeline,
-    RouteSegment
+from src.frontend.components.route_form import (
+    RouteFormData, render_route_form, display_route_summary, Location
 )
+from src.frontend.components.map_visualization import (
+    create_route_map, display_route_timeline, RouteSegment, TimelineEventType
+)
+from src.frontend.components.cost_calculation import (
+    display_enhanced_cost_breakdown, EnhancedCostBreakdown
+)
+from src.frontend.components.offer_generation import (
+    render_offer_controls, display_offer_preview
+)
+from src.frontend.integration import submit_route, get_route_cost
+from src.frontend.api_client import APIClient
 
-settings = get_settings()
+# Configure logging
+logger = structlog.get_logger(__name__)
 
 # Page configuration
 st.set_page_config(
-    page_title="LoadApp.AI - Smart Route Planning",
+    page_title="LoadApp.AI - Route Planning",
     page_icon="🚛",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Initialize session state
+if "api_client" not in st.session_state:
+    logger.info("Initializing API client")
+    st.session_state.api_client = APIClient(
+        base_url="http://localhost:5001",
+        api_key="development"
+    )
+    logger.info("API client initialized")
+
+if "route_segments" not in st.session_state:
+    st.session_state.route_segments = None
+if "pickup_time" not in st.session_state:
+    st.session_state.pickup_time = None
+if "route_id" not in st.session_state:
+    st.session_state.route_id = None
+if "cost_data" not in st.session_state:
+    st.session_state.cost_data = None
+if "show_offer_form" not in st.session_state:
+    st.session_state.show_offer_form = False
+if "current_route_id" not in st.session_state:
+    st.session_state.current_route_id = None
+if "offer_preview" not in st.session_state:
+    st.session_state.offer_preview = None
 
 # Custom styling
 st.markdown("""
@@ -41,155 +65,135 @@ st.markdown("""
     .stButton>button {
         width: 100%;
     }
-    .stTabs {
-        margin-top: 2rem;
-    }
     .stAlert {
         margin-top: 1rem;
         margin-bottom: 1rem;
     }
+    .route-details {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid #ccc;
+    }
     </style>
     """, unsafe_allow_html=True)
 
+def display_route_details(segments: List[RouteSegment], pickup_time: datetime):
+    """Display route details including map, timeline, and metrics."""
+    st.header("Route Details")
+    
+    # Display summary metrics
+    col1, col2, col3 = st.columns(3)
+    total_distance = sum(s.distance_km for s in segments)
+    total_duration = sum(s.duration_hours for s in segments)
+    empty_distance = sum(s.distance_km for s in segments if s.is_empty_driving)
+    
+    with col1:
+        st.metric("Total Distance", f"{total_distance:.1f} km")
+    with col2:
+        st.metric("Total Duration", f"{total_duration:.1f} hours")
+    with col3:
+        st.metric("Empty Driving", f"{empty_distance:.1f} km")
+    
+    # Display map
+    st.subheader("Route Map")
+    create_route_map(segments, key="route_map")
+    
+    # Display timeline
+    st.subheader("Route Timeline")
+    display_route_timeline(segments, pickup_time)
+
 def main():
     """Main application entry point."""
-    st.title("LoadApp.AI 🚛")
-    st.subheader("Smart Route Planning & Cost Calculation")
+    st.title("LoadApp.AI - Route Planning")
     
-    # Initialize session state
-    if "route_data" not in st.session_state:
-        st.session_state["route_data"] = None
-    if "cost_data" not in st.session_state:
-        st.session_state["cost_data"] = None
-    if "offer_data" not in st.session_state:
-        st.session_state["offer_data"] = None
+    # Create main form section
+    st.header("Create New Route")
     
-    # Sidebar with settings
-    with st.sidebar:
-        st.header("Quick Settings")
-        transport_type = st.selectbox(
-            "Transport Type",
-            ["Truck", "Van", "Container"]
-        )
-        cargo_type = st.selectbox(
-            "Cargo Type",
-            ["General", "Temperature Controlled", "Hazardous", "Bulk"]
-        )
-        
-        if st.button("Open Settings", type="secondary"):
-            st.session_state["show_settings"] = True
+    # Render the route form and handle submission
+    form_data = render_route_form()
     
-    # Show settings modal if requested
-    if st.session_state.get("show_settings", False):
-        with st.expander("Settings", expanded=True):
-            render_settings_management()
-            if st.button("Close Settings"):
-                st.session_state["show_settings"] = False
-    
-    # Main content area with tabs
-    tab1, tab2, tab3 = st.tabs(["Route Planning", "Cost Calculation", "Offers"])
-    
-    with tab1:
-        st.header("Route Planning")
-        route_data = render_route_form()
-        
-        if route_data:
-            with st.spinner("Processing route..."):
-                try:
-                    # TODO: Make API call to process route
-                    # For now, using dummy data
-                    segments = [
-                        RouteSegment(
-                            start_location=(52.5200, 13.4050),
-                            end_location=(52.5200, 13.8050),
-                            distance_km=200.0,
-                            duration_hours=4.0,
-                            is_empty_driving=True,
-                            country="Germany"
-                        ),
-                        RouteSegment(
-                            start_location=(52.5200, 13.8050),
-                            end_location=(50.0755, 14.4378),
-                            distance_km=350.0,
-                            duration_hours=5.0,
-                            country="Czech Republic"
-                        )
-                    ]
-                    
-                    # Display route visualization
-                    create_route_map(segments)
-                    display_route_timeline(segments)
-                    
-                    # Store route data
-                    st.session_state["route_data"] = route_data
+    if form_data:
+        with st.spinner("Calculating route..."):
+            try:
+                # Submit route and get segments
+                segments, pickup_time, route_id = submit_route(form_data)
+                
+                # Update session state
+                st.session_state.route_segments = segments
+                st.session_state.pickup_time = pickup_time
+                st.session_state.route_id = route_id
+                st.session_state.current_route_id = route_id
+                st.session_state.show_offer_form = False  # Reset offer form state
+                st.session_state.offer_preview = None  # Reset offer preview
+                
+                # Get route cost calculation
+                if st.session_state.route_id:
+                    with st.spinner("Calculating costs..."):
+                        cost_data = get_route_cost(st.session_state.route_id)
+                        if cost_data:
+                            st.session_state.cost_data = cost_data
+                            st.success("Route and costs calculated successfully!")
+                        else:
+                            st.warning("Route calculated but cost calculation failed.")
+                else:
                     st.success("Route calculated successfully!")
-                    
-                except Exception as e:
-                    st.error(f"Error processing route: {str(e)}")
+                
+            except Exception as e:
+                st.error(f"Error calculating route: {str(e)}")
     
-    with tab2:
-        st.header("Cost Calculation")
-        cost_settings = render_cost_settings()
+    # Display route details if available
+    if st.session_state.route_segments:
+        with st.container():
+            st.header("Route Details", anchor=False)
+            display_route_details(st.session_state.route_segments, st.session_state.pickup_time)
         
-        if st.session_state.get("route_data"):
-            with st.spinner("Calculating costs..."):
-                try:
-                    # TODO: Make API call to calculate costs
-                    # For now, using dummy data
-                    cost_data = CostBreakdown(
-                        base_cost=Decimal("500.00"),
-                        fuel_cost_loaded=Decimal("300.00"),
-                        fuel_cost_empty=Decimal("200.00"),
-                        driver_wages=Decimal("400.00"),
-                        vehicle_costs=Decimal("250.00"),
-                        toll_cost=Decimal("150.00"),
-                        parking_cost=Decimal("50.00"),
-                        cargo_insurance=Decimal("100.00"),
-                        cleaning_cost=Decimal("75.00"),
-                        leasing_cost=Decimal("200.00"),
-                        depreciation=Decimal("150.00"),
-                        insurance_cost=Decimal("100.00"),
-                        overhead_cost=Decimal("200.00")
-                    )
-                    
-                    display_cost_breakdown(cost_data)
-                    st.session_state["cost_data"] = cost_data
-                    
-                except Exception as e:
-                    st.error(f"Error calculating costs: {str(e)}")
-        else:
-            st.info("Please calculate a route first in the Route Planning tab.")
-    
-    with tab3:
-        st.header("Offers")
-        
-        if st.session_state.get("cost_data"):
-            offer_settings = render_offer_controls(
-                base_cost=st.session_state["cost_data"].total_cost
-            )
+        # Display cost breakdown if available
+        if st.session_state.cost_data:
+            with st.container():
+                st.header("Cost Breakdown", anchor=False)
+                display_enhanced_cost_breakdown(st.session_state.cost_data)
             
-            if offer_settings:
-                with st.spinner("Generating offer..."):
-                    try:
-                        # TODO: Make API call to generate fun fact
-                        fun_fact = "The route between Berlin and Prague follows an ancient trade route known as the 'Salt Road', which was used to transport salt from the Baltic Sea to Bohemia during medieval times."
+            # Show offer generation section
+            with st.container():
+                st.header("Generate Offer", anchor=False)
+                
+                # Add a button to show/hide the offer form
+                if not st.session_state.show_offer_form:
+                    if st.button("Create New Offer", key="create_offer_btn"):
+                        st.session_state.show_offer_form = True
+                        st.session_state.offer_preview = None
+                        st.experimental_rerun()
+                else:
+                    if st.button("Cancel", key="cancel_offer_btn"):
+                        st.session_state.show_offer_form = False
+                        st.session_state.offer_preview = None
+                        st.experimental_rerun()
+                
+                # Only show the offer form if the button has been clicked
+                if st.session_state.show_offer_form:
+                    st.divider()
+                    offer_settings = render_offer_controls(base_cost=st.session_state.cost_data.total_cost)
+                    
+                    if offer_settings and not st.session_state.get("offer_preview"):
+                        # Get route description from segments
+                        route_description = f"Transport from {st.session_state.route_segments[0].start_location.address} to {st.session_state.route_segments[-1].end_location.address}"
                         
-                        # Display offer preview
+                        # Store offer preview in session state
+                        st.session_state.offer_preview = {
+                            "settings": offer_settings,
+                            "base_cost": st.session_state.cost_data.total_cost,
+                            "route_description": route_description
+                        }
+                        st.experimental_rerun()
+                    
+                    # Display offer preview if available
+                    if st.session_state.get("offer_preview"):
+                        preview = st.session_state.offer_preview
                         display_offer_preview(
-                            offer_settings=offer_settings,
-                            base_cost=st.session_state["cost_data"].total_cost,
-                            route_description="Transport from Berlin to Prague via A13 and D8 highways",
-                            fun_fact=fun_fact if offer_settings["fun_fact"] else None
+                            offer_settings=preview["settings"],
+                            base_cost=preview["base_cost"],
+                            route_description=preview["route_description"]
                         )
-                        
-                        if st.session_state.get("offer_finalized"):
-                            st.success("Offer finalized successfully!")
-                            # TODO: Save offer to database
-                            
-                    except Exception as e:
-                        st.error(f"Error generating offer: {str(e)}")
-        else:
-            st.info("Please calculate route costs first in the Cost Calculation tab.")
 
 if __name__ == "__main__":
     main()

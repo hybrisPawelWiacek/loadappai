@@ -2,7 +2,7 @@
 import os
 import pytest
 from flask import Flask
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy import create_engine
 from unittest.mock import Mock, patch
 
@@ -10,7 +10,7 @@ from src.api.app import app as flask_app
 from src.domain.services import RoutePlanningService
 from src.infrastructure.repositories.route_repository import RouteRepository
 from src.infrastructure.services.google_maps_service import GoogleMapsService
-from src.infrastructure.database import Base
+from src.infrastructure.database import Base, Database
 
 @pytest.fixture(autouse=True)
 def setup_test_env():
@@ -54,6 +54,14 @@ def db_session(engine) -> Session:
     session.close()
     transaction.rollback()
     connection.close()
+
+@pytest.fixture(scope="module")
+def test_db(engine) -> Database:
+    """Create test database instance."""
+    db = Database()
+    db.engine = engine
+    db.session_factory = sessionmaker(bind=engine)
+    return db
 
 @pytest.fixture(scope="module")
 def mock_openai_service():

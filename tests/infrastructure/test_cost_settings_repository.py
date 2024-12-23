@@ -22,21 +22,49 @@ def valid_cost_settings_entity():
     """Create a valid cost settings entity."""
     return CostSettingsEntity(
         id=str(uuid4()),
-        fuel_price_per_liter=Decimal("1.85"),
-        driver_daily_salary=Decimal("200.00"),
-        toll_rates={
-            "DE": Decimal("0.20"),
-            "FR": Decimal("0.15"),
-            "PL": Decimal("0.10")
+        fuel_prices={
+            "DE": Decimal("1.80"),
+            "PL": Decimal("1.65"),
+            "CZ": Decimal("1.70")
         },
-        overheads={
-            "maintenance": Decimal("0.05"),
-            "insurance": Decimal("0.03")
+        driver_rates={
+            "DE": Decimal("200.00"),
+            "PL": Decimal("150.00"),
+            "CZ": Decimal("160.00")
+        },
+        toll_rates={
+            "DE": Decimal("0.187"),
+            "PL": Decimal("0.095"),
+            "CZ": Decimal("0.108")
+        },
+        maintenance_rate_per_km=Decimal("0.15"),
+        rest_period_rate=Decimal("25.00"),
+        loading_unloading_rate=Decimal("50.00"),
+        empty_driving_factors={
+            "fuel": Decimal("0.85"),
+            "toll": Decimal("1.00"),
+            "driver": Decimal("1.00")
         },
         cargo_factors={
-            "standard": Decimal("1.0"),
-            "hazmat": Decimal("1.5"),
-            "refrigerated": Decimal("1.3")
+            "standard": {
+                "weight": Decimal("0.001"),
+                "volume": Decimal("0.05")
+            },
+            "hazmat": {
+                "weight": Decimal("0.002"),
+                "volume": Decimal("0.08"),
+                "hazard": Decimal("1.50")
+            },
+            "refrigerated": {
+                "weight": Decimal("0.001"),
+                "volume": Decimal("0.05"),
+                "temperature": Decimal("2.50")
+            }
+        },
+        overhead_rates={
+            "distance": Decimal("0.10"),
+            "time": Decimal("15.00"),
+            "fixed": Decimal("100.00")
         },
         last_modified=datetime.now(timezone.utc),
         metadata={"version": "1.0"}
@@ -50,7 +78,7 @@ def test_create_cost_settings(
     """Test creating new cost settings."""
     created_settings = cost_settings_repository.create(valid_cost_settings_entity)
     assert created_settings.id == valid_cost_settings_entity.id
-    assert created_settings.fuel_price_per_liter == valid_cost_settings_entity.fuel_price_per_liter
+    assert created_settings.fuel_prices == valid_cost_settings_entity.fuel_prices
     assert created_settings.toll_rates == valid_cost_settings_entity.toll_rates
     assert created_settings.metadata == valid_cost_settings_entity.metadata
 
@@ -79,11 +107,11 @@ def test_update_cost_settings(
 ):
     """Test updating cost settings."""
     created_settings = cost_settings_repository.create(valid_cost_settings_entity)
-    created_settings.fuel_price_per_liter = Decimal("2.00")
+    created_settings.fuel_prices["DE"] = Decimal("2.00")
     created_settings.toll_rates["DE"] = Decimal("0.25")
     updated_settings = cost_settings_repository.update(str(created_settings.id), created_settings)
     assert updated_settings is not None
-    assert updated_settings.fuel_price_per_liter == Decimal("2.00")
+    assert updated_settings.fuel_prices["DE"] == Decimal("2.00")
     assert updated_settings.toll_rates["DE"] == Decimal("0.25")
 
 
@@ -111,12 +139,12 @@ def test_get_latest_cost_settings(
     second_settings = valid_cost_settings_entity.model_copy()
     second_settings.id = str(uuid4())
     second_settings.last_modified = datetime.now(timezone.utc)
-    second_settings.fuel_price_per_liter = Decimal("2.10")
+    second_settings.fuel_prices["DE"] = Decimal("2.10")
     cost_settings_repository.create(second_settings)
 
     latest_settings = cost_settings_repository.get_latest()
     assert latest_settings is not None
-    assert latest_settings.fuel_price_per_liter == Decimal("2.10")
+    assert latest_settings.fuel_prices["DE"] == Decimal("2.10")
 
 
 def test_get_by_date(
@@ -127,22 +155,22 @@ def test_get_by_date(
     # Create settings with different timestamps
     first_settings = valid_cost_settings_entity
     first_settings.last_modified = datetime.now(timezone.utc) - timedelta(days=2)
-    first_settings.fuel_price_per_liter = Decimal("1.85")
+    first_settings.fuel_prices["DE"] = Decimal("1.85")
     cost_settings_repository.create(first_settings)
 
     second_settings = valid_cost_settings_entity.model_copy()
     second_settings.id = str(uuid4())
     second_settings.last_modified = datetime.now(timezone.utc) - timedelta(days=1)
-    second_settings.fuel_price_per_liter = Decimal("2.00")
+    second_settings.fuel_prices["DE"] = Decimal("2.00")
     cost_settings_repository.create(second_settings)
 
     # Test getting settings at different points in time
     query_date = datetime.now(timezone.utc) - timedelta(days=1, hours=12)
     settings = cost_settings_repository.get_by_date(query_date)
     assert settings is not None
-    assert settings.fuel_price_per_liter == Decimal("1.85")
+    assert settings.fuel_prices["DE"] == Decimal("1.85")
 
     query_date = datetime.now(timezone.utc)
     settings = cost_settings_repository.get_by_date(query_date)
     assert settings is not None
-    assert settings.fuel_price_per_liter == Decimal("2.00")
+    assert settings.fuel_prices["DE"] == Decimal("2.00")

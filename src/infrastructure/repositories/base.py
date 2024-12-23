@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Generic, List, Optional, TypeVar
 
 from sqlalchemy.orm import Session
+from src.infrastructure.database import Database
 
 T = TypeVar("T")
 
@@ -10,8 +11,8 @@ T = TypeVar("T")
 class Repository(ABC, Generic[T]):
     """Base repository interface."""
 
-    def __init__(self, db: Session):
-        """Initialize repository with database session."""
+    def __init__(self, db: Database):
+        """Initialize repository with database."""
         self.db = db
 
     @abstractmethod

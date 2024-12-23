@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(default="")
     GOOGLE_MAPS_API_KEY: str = Field(default="")
 
+    # Backend Settings
+    BACKEND_URL: str = Field(default="http://localhost:5000")
+
     # OpenAI Settings
     OPENAI_MODEL: str = Field(default="gpt-3.5-turbo")
     OPENAI_MAX_RETRIES: int = Field(default=3, gt=0)

@@ -5,8 +5,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from src.domain.entities import Route as RouteEntity
-from src.domain.value_objects import EmptyDriving, Location, RouteMetadata
+from src.domain.entities import (
+    Route as RouteEntity, Location, EmptyDriving, TransportType,
+    CountrySegment
+)
+from src.domain.value_objects import RouteMetadata
 from src.infrastructure.models import Route as RouteModel
 from src.infrastructure.repositories.route_repository import RouteRepository
 
@@ -25,17 +28,19 @@ def valid_route_entity():
         origin=Location(
             address="Test Origin",
             latitude=52.2297,
-            longitude=21.0122
+            longitude=21.0122,
+            country="PL"
         ),
         destination=Location(
             address="Test Destination",
             latitude=53.2297,
-            longitude=22.0122
+            longitude=22.0122,
+            country="DE"
         ),
         pickup_time=datetime.fromtimestamp(datetime.now().timestamp(), tz=timezone.utc),
         delivery_time=datetime.fromtimestamp((datetime.now() + timedelta(days=1)).timestamp(), tz=timezone.utc),
-        transport_type="standard",
-        cargo_id=None,
+        transport_type=TransportType.TRUCK,
+        cargo_id=str(uuid4()),
         distance_km=500.0,
         duration_hours=8.0,
         empty_driving=EmptyDriving(
@@ -43,9 +48,25 @@ def valid_route_entity():
             duration_hours=1.0
         ),
         is_feasible=True,
-        metadata=RouteMetadata(
-            weather_data={"test": "data"}
-        )
+        metadata={"weather_data": {"test": "data"}},
+        country_segments=[
+            CountrySegment(
+                country="Poland",
+                country_code="PL",
+                distance_km=200.0,
+                duration_hours=3.0,
+                road_types={"highway": 150.0, "rural": 50.0},
+                toll_roads=True
+            ),
+            CountrySegment(
+                country="Germany",
+                country_code="DE",
+                distance_km=300.0,
+                duration_hours=5.0,
+                road_types={"highway": 250.0, "rural": 50.0},
+                toll_roads=True
+            )
+        ]
     )
 
 
@@ -57,16 +78,18 @@ def another_route_entity(valid_route_entity: RouteEntity):
         origin=Location(
             address="Another Origin",
             latitude=51.5074,
-            longitude=-0.1278
+            longitude=-0.1278,
+            country="GB"
         ),
         destination=Location(
             address="Another Destination",
             latitude=48.8566,
-            longitude=2.3522
+            longitude=2.3522,
+            country="FR"
         ),
         pickup_time=datetime.fromtimestamp((datetime.now() + timedelta(days=2)).timestamp(), tz=timezone.utc),
         delivery_time=datetime.fromtimestamp((datetime.now() + timedelta(days=3)).timestamp(), tz=timezone.utc),
-        transport_type="refrigerated",
+        transport_type=TransportType.TRAILER,
         cargo_id="CARGO123",
         distance_km=750.0,
         duration_hours=12.0,
@@ -75,9 +98,25 @@ def another_route_entity(valid_route_entity: RouteEntity):
             duration_hours=1.5
         ),
         is_feasible=False,
-        metadata=RouteMetadata(
-            weather_data={"another": "data"}
-        )
+        metadata={"weather_data": {"another": "data"}},
+        country_segments=[
+            CountrySegment(
+                country="United Kingdom",
+                country_code="GB",
+                distance_km=250.0,
+                duration_hours=4.0,
+                road_types={"highway": 200.0, "rural": 50.0},
+                toll_roads=True
+            ),
+            CountrySegment(
+                country="France",
+                country_code="FR",
+                distance_km=500.0,
+                duration_hours=8.0,
+                road_types={"highway": 400.0, "rural": 100.0},
+                toll_roads=True
+            )
+        ]
     )
 
 
@@ -89,7 +128,7 @@ def test_create_route(route_repository: RouteRepository, valid_route_entity: Rou
     assert created_route.destination.longitude == valid_route_entity.destination.longitude
     assert created_route.distance_km == valid_route_entity.distance_km
     assert created_route.empty_driving.distance_km == valid_route_entity.empty_driving.distance_km
-    assert created_route.metadata.weather_data == valid_route_entity.metadata.weather_data
+    assert created_route.metadata == valid_route_entity.metadata
 
 
 def test_get_route(route_repository: RouteRepository, valid_route_entity: RouteEntity):
@@ -141,12 +180,7 @@ def test_update_route(route_repository: RouteRepository, valid_route_entity: Rou
     # Create a new EmptyDriving instance instead of modifying the existing one
     created_route.empty_driving = EmptyDriving(distance_km=60.0, duration_hours=created_route.empty_driving.duration_hours)
     # Create a new RouteMetadata instance instead of modifying the existing one
-    created_route.metadata = RouteMetadata(
-        weather_data={"updated": "data"},
-        traffic_data=created_route.metadata.traffic_data,
-        compliance_data=created_route.metadata.compliance_data,
-        optimization_data=created_route.metadata.optimization_data
-    )
+    created_route.metadata = {"weather_data": {"updated": "data"}}
 
     updated_route = route_repository.update(str(created_route.id), created_route)
     assert updated_route is not None
@@ -155,7 +189,7 @@ def test_update_route(route_repository: RouteRepository, valid_route_entity: Rou
     assert updated_route.is_feasible is False
     assert updated_route.cargo_id == "NEW_CARGO"
     assert updated_route.empty_driving.distance_km == 60.0
-    assert updated_route.metadata.weather_data == {"updated": "data"}
+    assert updated_route.metadata == {"weather_data": {"updated": "data"}}
 
 
 def test_update_nonexistent_route(route_repository: RouteRepository, valid_route_entity: RouteEntity):

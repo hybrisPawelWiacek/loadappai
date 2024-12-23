@@ -56,15 +56,24 @@ def tables(engine):
 def db_session(engine, tables):
     """Create a new database session for a test."""
     connection = engine.connect()
-    # Begin a non-ORM transaction
     transaction = connection.begin()
-    # Bind an individual Session to the connection
-    Session = sessionmaker(bind=connection)
-    session = Session()
+    session_factory = sessionmaker(bind=connection)
+    session = session_factory()
+
+    # Begin a nested transaction (using SAVEPOINT)
+    nested = connection.begin_nested()
+
+    # If the application code calls session.commit, it will end the nested
+    # transaction. Need to start a new one when that happens.
+    @event.listens_for(session, 'after_transaction_end')
+    def end_savepoint(session, transaction):
+        nonlocal nested
+        if not nested.is_active:
+            nested = connection.begin_nested()
 
     yield session
 
-    # Rollback the transaction and close the session
+    # Rollback the overall transaction, restoring the state
     session.close()
     transaction.rollback()
     connection.close()

@@ -1,5 +1,7 @@
 """OpenAI service implementation."""
 from typing import Any, Dict, Optional
+import time
+import httpx
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
@@ -7,10 +9,11 @@ from openai._exceptions import OpenAIError
 
 from src.domain.interfaces import AIService, AIServiceError
 from src.domain.value_objects import Location
+from src.domain.entities import Route
 from src.config import get_settings
-import time
-import httpx
+from src.infrastructure.logging import get_logger
 
+logger = get_logger()
 
 class OpenAIService(AIService):
     """OpenAI API implementation of AIService."""
@@ -177,3 +180,53 @@ class OpenAIService(AIService):
             raise AIServiceError(f"Failed to enhance route description: {str(e)}")
         except Exception as e:
             raise AIServiceError(f"Unexpected error in route description enhancement: {str(e)}")
+
+    def generate_route_description(self, route: Route) -> str:
+        """Generate an enhanced description of the route using AI."""
+        ai_logger = logger.bind(service="openai", route_id=str(route.id))
+        ai_logger.info("generating_route_description")
+        ai_logger.debug("route_data", origin=route.origin, destination=route.destination)
+        
+        try:
+            # Extract location info safely with fallbacks
+            origin_addr = route.origin.get('address', route.origin.get('city', 'Unknown Location'))
+            dest_addr = route.destination.get('address', route.destination.get('city', 'Unknown Location'))
+            
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant that generates concise route descriptions for a logistics company."},
+                {"role": "user", "content": f"Generate a brief, professional description for a transport route from {origin_addr} to {dest_addr}. Distance: {route.distance_km:.1f} km, Duration: {route.duration_hours:.1f} hours"}
+            ]
+            
+            response = self._make_request(messages)
+            description = response.choices[0].message.content.strip()
+            ai_logger.info("description_generated", length=len(description))
+            return description
+        except Exception as e:
+            ai_logger.error("description_generation_failed", error=str(e))
+            raise AIServiceError(f"Failed to generate route description: {str(e)}")
+
+    def generate_fun_fact(self, route: Route) -> str:
+        """Generate an interesting fact about the route using AI."""
+        ai_logger = logger.bind(service="openai", route_id=str(route.id))
+        ai_logger.info("generating_fun_fact")
+        ai_logger.debug("route_data", origin=route.origin, destination=route.destination)
+        
+        try:
+            # Extract location info safely with fallbacks
+            origin_city = route.origin.get('city', route.origin.get('address', 'Unknown City'))
+            origin_country = route.origin.get('country', 'Unknown Country')
+            dest_city = route.destination.get('city', route.destination.get('address', 'Unknown City'))
+            dest_country = route.destination.get('country', 'Unknown Country')
+            
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant that generates interesting facts about transport routes."},
+                {"role": "user", "content": f"Generate a brief, interesting fact about a transport route from {origin_city}, {origin_country} to {dest_city}, {dest_country}. Make it relevant to logistics or transportation."}
+            ]
+            
+            response = self._make_request(messages)
+            fun_fact = response.choices[0].message.content.strip()
+            ai_logger.info("fun_fact_generated", length=len(fun_fact))
+            return fun_fact
+        except Exception as e:
+            ai_logger.error("fun_fact_generation_failed", error=str(e))
+            raise AIServiceError(f"Failed to generate fun fact: {str(e)}")

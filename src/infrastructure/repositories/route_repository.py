@@ -18,8 +18,8 @@ class RouteRepository(Repository[RouteEntity]):
         """Create a new route."""
         db_route = RouteModel(
             id=str(entity.id),
-            origin=entity.origin.model_dump(),
-            destination=entity.destination.model_dump(),
+            origin=entity.origin,  
+            destination=entity.destination,  
             pickup_time=entity.pickup_time.astimezone(timezone.utc),
             delivery_time=entity.delivery_time.astimezone(timezone.utc),
             transport_type=entity.transport_type,
@@ -28,11 +28,13 @@ class RouteRepository(Repository[RouteEntity]):
             duration_hours=entity.duration_hours,
             empty_driving=entity.empty_driving.model_dump() if entity.empty_driving else None,
             is_feasible=entity.is_feasible,
-            extra_data=entity.metadata.model_dump() if entity.metadata else None,
+            extra_data=entity.metadata.model_dump() if entity.metadata else None
         )
+        
         self.db.add(db_route)
         self.db.commit()
         self.db.refresh(db_route)
+        
         return self._to_entity(db_route)
 
     def get(self, id: str) -> Optional[RouteEntity]:
@@ -52,8 +54,8 @@ class RouteRepository(Repository[RouteEntity]):
             return None
 
         update_data = {
-            "origin": entity.origin.model_dump(),
-            "destination": entity.destination.model_dump(),
+            "origin": entity.origin,  
+            "destination": entity.destination,  
             "pickup_time": entity.pickup_time.astimezone(timezone.utc),
             "delivery_time": entity.delivery_time.astimezone(timezone.utc),
             "transport_type": entity.transport_type,
@@ -82,6 +84,13 @@ class RouteRepository(Repository[RouteEntity]):
         self.db.commit()
         return True
 
+    def get_by_id(self, route_id: str) -> Optional[RouteEntity]:
+        """Get route by ID."""
+        route = self.db.query(RouteModel).filter(RouteModel.id == route_id).first()
+        if route is None:
+            return None
+        return self._to_entity(route)
+
     def find_by_criteria(
         self,
         origin_location: Optional[Location] = None,
@@ -91,71 +100,70 @@ class RouteRepository(Repository[RouteEntity]):
         transport_type: Optional[str] = None,
         is_feasible: Optional[bool] = None,
         skip: int = 0,
-        limit: int = 100,
+        limit: int = 100
     ) -> List[RouteEntity]:
         """Find routes by various criteria."""
         query = self.db.query(RouteModel)
 
-        # Build filter conditions
-        conditions = []
+        # Apply filters
         if origin_location:
-            # Use SQLite's json_extract function
-            conditions.append(
-                cast(
-                    func.json_extract(RouteModel.origin, "$.latitude"),
-                    Float
-                ) == origin_location.latitude
+            query = query.filter(
+                cast(RouteModel.origin[('coordinates', 'lat')], Float) == origin_location.coordinates.lat,
+                cast(RouteModel.origin[('coordinates', 'lng')], Float) == origin_location.coordinates.lng
             )
-            conditions.append(
-                cast(
-                    func.json_extract(RouteModel.origin, "$.longitude"),
-                    Float
-                ) == origin_location.longitude
-            )
+
         if destination_location:
-            conditions.append(
-                cast(
-                    func.json_extract(RouteModel.destination, "$.latitude"),
-                    Float
-                ) == destination_location.latitude
+            query = query.filter(
+                cast(RouteModel.destination[('coordinates', 'lat')], Float) == destination_location.coordinates.lat,
+                cast(RouteModel.destination[('coordinates', 'lng')], Float) == destination_location.coordinates.lng
             )
-            conditions.append(
-                cast(
-                    func.json_extract(RouteModel.destination, "$.longitude"),
-                    Float
-                ) == destination_location.longitude
-            )
+
         if start_date:
-            conditions.append(RouteModel.pickup_time >= start_date.astimezone(timezone.utc))
+            query = query.filter(RouteModel.pickup_time >= start_date)
+
         if end_date:
-            conditions.append(RouteModel.delivery_time <= end_date.astimezone(timezone.utc))
+            query = query.filter(RouteModel.delivery_time <= end_date)
+
         if transport_type:
-            conditions.append(RouteModel.transport_type == transport_type)
+            query = query.filter(RouteModel.transport_type == transport_type)
+
         if is_feasible is not None:
-            conditions.append(RouteModel.is_feasible == is_feasible)
+            query = query.filter(RouteModel.is_feasible == is_feasible)
 
-        if conditions:
-            query = query.filter(and_(*conditions))
+        # Apply pagination
+        routes = query.offset(skip).limit(limit).all()
+        return [self._to_entity(route) for route in routes]
 
-        db_routes = query.offset(skip).limit(limit).all()
-        return [self._to_entity(db_route) for db_route in db_routes]
-
-    def _to_entity(self, db_route: RouteModel) -> Optional[RouteEntity]:
+    def _to_entity(self, model: RouteModel) -> RouteEntity:
         """Convert database model to domain entity."""
-        if not db_route:
+        if not model:
             return None
 
+        # Create Location objects from dictionaries
+        origin = Location(**model.origin)
+        destination = Location(**model.destination)
+        
+        # Create EmptyDriving if present
+        empty_driving = None
+        if model.empty_driving:
+            empty_driving = EmptyDriving(**model.empty_driving)
+        
+        # Create RouteMetadata if present
+        metadata = None
+        if model.extra_data:
+            metadata = RouteMetadata(**model.extra_data)
+        
         return RouteEntity(
-            id=db_route.id,
-            origin=Location(**db_route.origin),
-            destination=Location(**db_route.destination),
-            pickup_time=db_route.pickup_time.replace(tzinfo=timezone.utc),
-            delivery_time=db_route.delivery_time.replace(tzinfo=timezone.utc),
-            transport_type=db_route.transport_type,
-            cargo_id=db_route.cargo_id,
-            distance_km=db_route.distance_km,
-            duration_hours=db_route.duration_hours,
-            empty_driving=EmptyDriving(**db_route.empty_driving) if db_route.empty_driving else None,
-            is_feasible=db_route.is_feasible,
-            metadata=RouteMetadata(**db_route.extra_data) if db_route.extra_data else None,
+            id=model.id,
+            origin=origin.dict(),  # Convert back to dict
+            destination=destination.dict(),  # Convert back to dict
+            pickup_time=model.pickup_time,
+            delivery_time=model.delivery_time,
+            transport_type=model.transport_type,
+            cargo_id=model.cargo_id,
+            distance_km=model.distance_km,
+            duration_hours=model.duration_hours,
+            empty_driving=empty_driving,
+            is_feasible=model.is_feasible,
+            metadata=metadata
         )

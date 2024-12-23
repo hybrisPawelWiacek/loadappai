@@ -102,3 +102,19 @@ Verify the correct location based on clean architecture
   3. Verify all test cases still make sense
 - Maintain test coverage above 60%
 - Keep test fixtures up to date with implementation
+
+## 10. SQLAlchemy Model Guidelines
+- Avoid using reserved names in model definitions:
+  - `metadata` (reserved by SQLAlchemy)
+  - `query` (reserved by Flask-SQLAlchemy)
+  - `session` (reserved by SQLAlchemy)
+- Follow model naming conventions:
+  - Use PascalCase for model class names
+  - Use snake_case for column names
+  - Suffix model classes with 'Model' when in infrastructure layer
+- Keep models in dedicated files:
+  - Base models in `src/infrastructure/models.py`
+  - Complex models in separate files under `src/infrastructure/models/`
+- Always define explicit table names:
+  ```python
+  __tablename__ = 'my_table_name'

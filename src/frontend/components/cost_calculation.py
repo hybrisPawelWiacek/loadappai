@@ -1,171 +1,188 @@
 """
-Cost calculation component for LoadApp.AI
+Cost calculation component.
 """
 import streamlit as st
 from typing import Dict, Optional
 from dataclasses import dataclass
 from decimal import Decimal
+import structlog
+
+# Configure logging
+logger = structlog.get_logger(__name__)
 
 @dataclass
-class CostBreakdown:
-    """Data class for cost breakdown details."""
-    # Base costs
-    base_cost: Decimal
-    # Driver and vehicle costs
-    driver_wages: Decimal
-    vehicle_costs: Decimal
-    # Fuel costs (separated for loaded and empty)
-    fuel_cost_loaded: Decimal
-    fuel_cost_empty: Optional[Decimal] = None
-    # Route-specific costs
-    toll_cost: Optional[Decimal] = None
-    parking_cost: Optional[Decimal] = None
+class EnhancedCostBreakdown:
+    """Enhanced data class for detailed cost breakdown."""
+    # Country-specific costs
+    fuel_costs: Dict[str, Decimal]
+    toll_costs: Dict[str, Decimal]
+    driver_costs: Dict[str, Decimal]
+    
+    # Time-based costs
+    rest_period_costs: Decimal
+    loading_unloading_costs: Decimal
+    
+    # Empty driving costs per country
+    empty_driving_costs: Dict[str, Dict[str, Decimal]]
+    
     # Cargo-specific costs
-    cargo_insurance: Optional[Decimal] = None
-    cleaning_cost: Optional[Decimal] = None
-    temperature_control: Optional[Decimal] = None
-    # Business overheads
-    leasing_cost: Optional[Decimal] = None
-    depreciation: Optional[Decimal] = None
-    insurance_cost: Optional[Decimal] = None
-    overhead_cost: Optional[Decimal] = None
+    cargo_specific_costs: Dict[str, Decimal]
+    
+    # Overhead costs
+    overheads: Dict[str, Decimal]
+    
+    # Metadata
+    calculation_method: str
+    is_final: bool
+    version: str = "2.0"
+    currency: str = "EUR"
     
     @property
     def total_fuel_cost(self) -> Decimal:
-        """Calculate total fuel cost."""
-        return self.fuel_cost_loaded + (self.fuel_cost_empty or Decimal("0"))
+        """Calculate total fuel cost across all countries."""
+        return sum(self.fuel_costs.values(), Decimal("0"))
     
     @property
-    def total_route_costs(self) -> Decimal:
-        """Calculate total route-specific costs."""
+    def total_toll_cost(self) -> Decimal:
+        """Calculate total toll cost across all countries."""
+        return sum(self.toll_costs.values(), Decimal("0"))
+    
+    @property
+    def total_driver_cost(self) -> Decimal:
+        """Calculate total driver cost across all countries."""
+        return sum(self.driver_costs.values(), Decimal("0"))
+    
+    @property
+    def total_empty_driving_cost(self) -> Decimal:
+        """Calculate total empty driving cost."""
         total = Decimal("0")
-        if self.toll_cost:
-            total += self.toll_cost
-        if self.parking_cost:
-            total += self.parking_cost
+        for country_costs in self.empty_driving_costs.values():
+            total += sum(Decimal(str(cost)) for cost in country_costs.values())
         return total
     
     @property
-    def total_cargo_costs(self) -> Decimal:
-        """Calculate total cargo-specific costs."""
-        total = Decimal("0")
-        if self.cargo_insurance:
-            total += self.cargo_insurance
-        if self.cleaning_cost:
-            total += self.cleaning_cost
-        if self.temperature_control:
-            total += self.temperature_control
-        return total
+    def total_cargo_cost(self) -> Decimal:
+        """Calculate total cargo-specific cost."""
+        return sum(self.cargo_specific_costs.values(), Decimal("0"))
     
     @property
-    def total_overhead_costs(self) -> Decimal:
-        """Calculate total overhead costs."""
-        total = Decimal("0")
-        if self.leasing_cost:
-            total += self.leasing_cost
-        if self.depreciation:
-            total += self.depreciation
-        if self.insurance_cost:
-            total += self.insurance_cost
-        if self.overhead_cost:
-            total += self.overhead_cost
-        return total
+    def total_overhead_cost(self) -> Decimal:
+        """Calculate total overhead cost."""
+        return sum(Decimal(str(v)) for v in self.overheads.values())
     
     @property
     def total_cost(self) -> Decimal:
         """Calculate total cost including all components."""
-        return (
-            self.base_cost +
-            self.total_fuel_cost +
-            self.driver_wages +
-            self.vehicle_costs +
-            self.total_route_costs +
-            self.total_cargo_costs +
-            self.total_overhead_costs
-        )
+        components = [
+            self.total_fuel_cost,
+            self.total_toll_cost,
+            self.total_driver_cost,
+            self.rest_period_costs,
+            self.loading_unloading_costs,
+            self.total_empty_driving_cost,
+            self.total_cargo_cost,
+            self.total_overhead_cost
+        ]
+        return sum(components, Decimal("0"))
 
-def display_cost_breakdown(cost_data: CostBreakdown):
+
+def display_enhanced_cost_breakdown(cost_data: EnhancedCostBreakdown):
     """Display a detailed breakdown of transportation costs.
     
     Args:
-        cost_data: The cost breakdown data to display
+        cost_data: Cost breakdown data from the API
     """
+    cost_logger = logger.bind(component="cost_breakdown")
+    cost_logger.info("Displaying cost breakdown",
+                total_cost=str(cost_data.total_cost),
+                has_fuel_costs=bool(cost_data.fuel_costs),
+                has_toll_costs=bool(cost_data.toll_costs),
+                has_driver_costs=bool(cost_data.driver_costs))
+    
     st.subheader("Cost Breakdown")
     
-    # Base costs
-    with st.expander("Base Costs", expanded=True):
+    # Log individual cost components
+    cost_logger.info("Cost components",
+                fuel_costs={k: str(v) for k, v in cost_data.fuel_costs.items()},
+                toll_costs={k: str(v) for k, v in cost_data.toll_costs.items()},
+                driver_costs={k: str(v) for k, v in cost_data.driver_costs.items()},
+                rest_period_costs=str(cost_data.rest_period_costs),
+                loading_unloading_costs=str(cost_data.loading_unloading_costs),
+                empty_driving_costs={k: {sk: str(sv) for sk, sv in v.items()}
+                                   for k, v in cost_data.empty_driving_costs.items()},
+                cargo_specific_costs={k: str(v) for k, v in cost_data.cargo_specific_costs.items()},
+                overheads={k: str(v) for k, v in cost_data.overheads.items()})
+    
+    # Distance-Based Costs
+    with st.expander("Distance-Based Costs", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            fuel_cost = float(cost_data.total_fuel_cost)
+            cost_logger.info("Displaying fuel cost", value=str(fuel_cost))
+            st.metric("Fuel Cost", f"€{fuel_cost:,.2f}")
+        with col2:
+            toll_cost = float(cost_data.total_toll_cost)
+            cost_logger.info("Displaying toll cost", value=str(toll_cost))
+            st.metric("Toll Cost", f"€{toll_cost:,.2f}")
+        with col3:
+            maintenance_cost = float(Decimal(str(cost_data.overheads.get('maintenance', '0'))))
+            cost_logger.info("Displaying maintenance cost", value=str(maintenance_cost))
+            st.metric("Maintenance Cost", f"€{maintenance_cost:,.2f}")
+    
+    # Time-Based Costs
+    with st.expander("Time-Based Costs", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            driver_cost = float(cost_data.total_driver_cost)
+            cost_logger.info("Displaying driver cost", value=str(driver_cost))
+            st.metric("Driver Cost", f"€{driver_cost:,.2f}")
+        with col2:
+            rest_cost = float(cost_data.rest_period_costs)
+            cost_logger.info("Displaying rest period cost", value=str(rest_cost))
+            st.metric("Rest Period Cost", f"€{rest_cost:,.2f}")
+        with col3:
+            loading_cost = float(cost_data.loading_unloading_costs)
+            cost_logger.info("Displaying loading/unloading cost", value=str(loading_cost))
+            st.metric("Loading/Unloading", f"€{loading_cost:,.2f}")
+    
+    # Empty Driving Costs
+    with st.expander("Empty Driving Costs", expanded=True):
+        empty_cost = float(cost_data.total_empty_driving_cost)
+        cost_logger.info("Displaying empty driving cost", value=str(empty_cost))
+        st.metric("Empty Driving Total", f"€{empty_cost:,.2f}")
+        
+        # Show breakdown by country if available
+        if cost_data.empty_driving_costs:
+            st.write("Breakdown by Country:")
+            for country, costs in cost_data.empty_driving_costs.items():
+                country_total = sum(float(Decimal(str(v))) for v in costs.values())
+                cost_logger.info(f"Empty driving cost for {country}", value=str(country_total))
+                st.write(f"{country}: €{country_total:,.2f}")
+    
+    # Additional Costs
+    with st.expander("Additional Costs", expanded=True):
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Base Cost", f"€{cost_data.base_cost:,.2f}")
+            cargo_cost = float(cost_data.total_cargo_cost)
+            cost_logger.info("Displaying cargo cost", value=str(cargo_cost))
+            st.metric("Cargo-Specific", f"€{cargo_cost:,.2f}")
         with col2:
-            st.metric("Vehicle Costs", f"€{cost_data.vehicle_costs:,.2f}")
+            overhead_cost = float(cost_data.total_overhead_cost)
+            cost_logger.info("Displaying overhead cost", value=str(overhead_cost))
+            st.metric("Overheads", f"€{overhead_cost:,.2f}")
     
-    # Fuel costs
-    with st.expander("Fuel Costs", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Loaded Fuel Cost", f"€{cost_data.fuel_cost_loaded:,.2f}")
-        with col2:
-            if cost_data.fuel_cost_empty:
-                st.metric("Empty Driving Fuel Cost", f"€{cost_data.fuel_cost_empty:,.2f}")
-        st.metric("Total Fuel Cost", f"€{cost_data.total_fuel_cost:,.2f}")
-    
-    # Route costs
-    if cost_data.total_route_costs > 0:
-        with st.expander("Route Costs"):
-            col1, col2 = st.columns(2)
-            with col1:
-                if cost_data.toll_cost:
-                    st.metric("Toll Cost", f"€{cost_data.toll_cost:,.2f}")
-            with col2:
-                if cost_data.parking_cost:
-                    st.metric("Parking Cost", f"€{cost_data.parking_cost:,.2f}")
-            st.metric("Total Route Costs", f"€{cost_data.total_route_costs:,.2f}")
-    
-    # Cargo costs
-    if cost_data.total_cargo_costs > 0:
-        with st.expander("Cargo-Specific Costs"):
-            col1, col2 = st.columns(2)
-            with col1:
-                if cost_data.cargo_insurance:
-                    st.metric("Cargo Insurance", f"€{cost_data.cargo_insurance:,.2f}")
-                if cost_data.cleaning_cost:
-                    st.metric("Cleaning Cost", f"€{cost_data.cleaning_cost:,.2f}")
-            with col2:
-                if cost_data.temperature_control:
-                    st.metric("Temperature Control", f"€{cost_data.temperature_control:,.2f}")
-            st.metric("Total Cargo Costs", f"€{cost_data.total_cargo_costs:,.2f}")
-    
-    # Overhead costs
-    if cost_data.total_overhead_costs > 0:
-        with st.expander("Business Overheads"):
-            col1, col2 = st.columns(2)
-            with col1:
-                if cost_data.leasing_cost:
-                    st.metric("Leasing Cost", f"€{cost_data.leasing_cost:,.2f}")
-                if cost_data.depreciation:
-                    st.metric("Depreciation", f"€{cost_data.depreciation:,.2f}")
-            with col2:
-                if cost_data.insurance_cost:
-                    st.metric("Insurance Cost", f"€{cost_data.insurance_cost:,.2f}")
-                if cost_data.overhead_cost:
-                    st.metric("Other Overheads", f"€{cost_data.overhead_cost:,.2f}")
-            st.metric("Total Overhead Costs", f"€{cost_data.total_overhead_costs:,.2f}")
-    
-    # Total cost
-    st.markdown("---")
-    st.metric(
-        "Total Cost",
-        f"€{cost_data.total_cost:,.2f}",
-        help="Total including all cost components"
-    )
+    # Total Cost
+    total_cost = float(cost_data.total_cost)
+    cost_logger.info("Displaying total cost", value=str(total_cost))
+    st.metric("Total Transportation Cost", f"€{total_cost:,.2f}", delta=None)
+
 
 def render_cost_settings():
-    """Render cost calculation settings and controls."""
+    """Render enhanced cost calculation settings and controls."""
     st.subheader("Cost Settings")
     
     with st.expander("Cost Components", expanded=True):
-        st.markdown("#### Enable/Disable Cost Components")
+        st.markdown("#### Cost Calculation Options")
         col1, col2 = st.columns(2)
         
         with col1:
@@ -174,115 +191,58 @@ def render_cost_settings():
                 value=True,
                 help="Calculate costs for return journey without cargo"
             )
-            include_tolls = st.checkbox(
-                "Include Toll Costs",
+            include_country_breakdown = st.checkbox(
+                "Show Country Breakdown",
                 value=True,
-                help="Calculate and include toll costs in the total"
+                help="Display costs broken down by country"
             )
-            include_parking = st.checkbox(
-                "Include Parking Costs",
+            include_time_costs = st.checkbox(
+                "Include Time-Based Costs",
                 value=True,
-                help="Include estimated parking costs"
+                help="Calculate rest periods and loading/unloading costs"
             )
         
         with col2:
-            include_cargo_insurance = st.checkbox(
-                "Include Cargo Insurance",
+            include_cargo_costs = st.checkbox(
+                "Include Cargo-Specific Costs",
                 value=True,
-                help="Add cargo insurance costs"
-            )
-            include_cleaning = st.checkbox(
-                "Include Cleaning Costs",
-                value=True,
-                help="Add vehicle cleaning costs"
+                help="Calculate costs based on cargo type and requirements"
             )
             include_overheads = st.checkbox(
                 "Include Business Overheads",
                 value=True,
-                help="Include business overhead costs"
+                help="Add fixed and variable overhead costs"
+            )
+            show_preliminary = st.checkbox(
+                "Show Preliminary Costs",
+                value=True,
+                help="Display non-final cost calculations"
             )
     
-    with st.expander("Base Rates"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fuel_price = st.number_input(
-                "Fuel Price (€/L)",
-                min_value=0.0,
-                value=1.8,
-                step=0.1,
-                format="%.2f"
-            )
-            driver_rate = st.number_input(
-                "Driver Rate (€/hour)",
-                min_value=0.0,
-                value=25.0,
-                step=1.0,
-                format="%.2f"
-            )
-        
-        with col2:
-            vehicle_rate = st.number_input(
-                "Vehicle Rate (€/km)",
-                min_value=0.0,
-                value=0.5,
-                step=0.1,
-                format="%.2f"
-            )
-            overhead_rate = st.number_input(
-                "Overhead Rate (%)",
-                min_value=0.0,
-                value=15.0,
-                step=1.0,
-                format="%.1f"
-            )
-    
-    with st.expander("Cargo-Specific Settings"):
-        temperature_control = st.checkbox(
-            "Temperature Control Required",
-            help="Enable for temperature-controlled cargo"
+    with st.expander("Calculation Method"):
+        calculation_method = st.radio(
+            "Select calculation method",
+            ["standard", "detailed", "estimated"],
+            help="Choose how detailed the cost calculation should be"
         )
-        if temperature_control:
-            temp_control_rate = st.number_input(
-                "Temperature Control Cost (€/hour)",
-                min_value=0.0,
-                value=10.0,
-                step=1.0,
-                format="%.2f"
-            )
         
-        cleaning_required = st.checkbox(
-            "Special Cleaning Required",
-            help="Enable for cargo requiring special cleaning"
-        )
-        if cleaning_required:
-            cleaning_rate = st.number_input(
-                "Cleaning Cost (€)",
-                min_value=0.0,
-                value=100.0,
-                step=10.0,
-                format="%.2f"
+        if calculation_method == "detailed":
+            st.info(
+                "Detailed calculation includes all cost components and "
+                "country-specific breakdowns. This may take longer to compute."
+            )
+        elif calculation_method == "estimated":
+            st.warning(
+                "Estimated calculation uses simplified models and average rates. "
+                "Results may be less accurate but are computed faster."
             )
     
     return {
-        "components": {
-            "empty_driving": include_empty_driving,
-            "tolls": include_tolls,
-            "parking": include_parking,
-            "cargo_insurance": include_cargo_insurance,
-            "cleaning": include_cleaning,
-            "overheads": include_overheads
-        },
-        "rates": {
-            "fuel_price": fuel_price,
-            "driver_rate": driver_rate,
-            "vehicle_rate": vehicle_rate,
-            "overhead_rate": overhead_rate
-        },
-        "cargo": {
-            "temperature_control": temperature_control,
-            "temperature_control_rate": temp_control_rate if temperature_control else None,
-            "cleaning_required": cleaning_required,
-            "cleaning_rate": cleaning_rate if cleaning_required else None
-        }
+        "include_empty_driving": include_empty_driving,
+        "include_country_breakdown": include_country_breakdown,
+        "include_time_costs": include_time_costs,
+        "include_cargo_costs": include_cargo_costs,
+        "include_overheads": include_overheads,
+        "show_preliminary": show_preliminary,
+        "calculation_method": calculation_method
     }

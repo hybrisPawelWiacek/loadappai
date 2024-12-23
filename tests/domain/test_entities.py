@@ -2,12 +2,211 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
-
+from pytz import UTC
 import pytest
 from pydantic import ValidationError
 
-from src.domain.entities import Cargo, Cost, CostSettings, Offer, Route, TransportType
-from src.domain.value_objects import CostBreakdown, EmptyDriving, Location, RouteMetadata
+from src.domain.entities import (
+    Route, Location, CountrySegment, EmptyDriving, TransportType,
+    CargoSpecification, VehicleSpecification, Cost, CostSettings, Offer,
+    TimeWindow, Cargo
+)
+from src.domain.value_objects import (
+    CostBreakdown,
+    RouteMetadata
+)
+
+
+@pytest.fixture
+def valid_cargo_spec():
+    """Fixture for valid cargo specification."""
+    return CargoSpecification(
+        cargo_type="refrigerated",
+        weight_kg=5000.0,
+        volume_m3=20.0,
+        temperature_controlled=True,
+        required_temp_celsius=-18.0,
+        special_handling=["quick_loading"],
+        hazmat_class=None
+    )
+
+
+@pytest.fixture
+def valid_vehicle_spec():
+    """Fixture for valid vehicle specification."""
+    return VehicleSpecification(
+        vehicle_type="reefer_truck",
+        fuel_consumption_rate=32.5,
+        empty_consumption_factor=0.85,
+        maintenance_rate_per_km=Decimal("0.15"),
+        toll_class="heavy",
+        has_special_equipment=True,
+        equipment_costs={"refrigeration_unit": Decimal("50.00")}
+    )
+
+
+@pytest.fixture
+def valid_time_windows():
+    """Fixture for valid time windows."""
+    now = datetime.now(UTC)
+    return [
+        TimeWindow(
+            location=Location(address="Warsaw", latitude=52.23, longitude=21.01),
+            earliest=now + timedelta(hours=1),
+            latest=now + timedelta(hours=2),
+            operation_type="pickup",
+            duration_hours=1.0
+        ),
+        TimeWindow(
+            location=Location(address="Berlin", latitude=52.52, longitude=13.40),
+            earliest=now + timedelta(hours=8),
+            latest=now + timedelta(hours=10),
+            operation_type="delivery",
+            duration_hours=1.0
+        )
+    ]
+
+
+def test_route_creation_with_specs(valid_cargo_spec, valid_vehicle_spec, valid_time_windows):
+    """Test creating a Route with specifications."""
+    route = Route(
+        origin=Location(address="Warsaw", latitude=52.23, longitude=21.01),
+        destination=Location(address="Berlin", latitude=52.52, longitude=13.40),
+        pickup_time=datetime.now(UTC),
+        delivery_time=datetime.now(UTC) + timedelta(days=1),
+        transport_type=TransportType.TRUCK,
+        distance_km=1050.0,
+        duration_hours=12.5,
+        empty_driving=EmptyDriving(distance_km=200.0, duration_hours=4.0),
+        cargo_specs=valid_cargo_spec,
+        vehicle_specs=valid_vehicle_spec,
+        time_windows=valid_time_windows,
+        country_segments=[
+            CountrySegment(
+                country="Poland",
+                country_code="PL",
+                distance_km=400.0,
+                duration_hours=5.0,
+                road_types={"highway": 300.0, "rural": 100.0},
+                toll_roads=True
+            ),
+            CountrySegment(
+                country="Germany",
+                country_code="DE",
+                distance_km=650.0,
+                duration_hours=7.5,
+                road_types={"highway": 500.0, "rural": 150.0},
+                toll_roads=True
+            )
+        ]
+    )
+    assert route.total_distance == 1250.0
+    assert route.total_duration == 16.5
+    assert route.get_country_distance("PL") == 400.0
+    assert route.get_country_duration("DE") == 7.5
+
+
+def test_cost_creation_with_validity():
+    """Test creating a Cost with validity period."""
+    cost = Cost(
+        route_id=uuid4(),
+        breakdown={
+            "fuel_costs": {
+                "PL": Decimal("150.75"),
+                "DE": Decimal("180.25")
+            },
+            "toll_costs": {
+                "PL": Decimal("85.50"),
+                "DE": Decimal("120.75")
+            },
+            "driver_costs": {
+                "PL": Decimal("100.00"),
+                "DE": Decimal("150.00")
+            },
+            "rest_period_costs": Decimal("75.00")
+        },
+        validity_period=timedelta(hours=24),
+        calculation_method="detailed",
+        version="2.0"
+    )
+    assert cost.is_valid()
+    assert cost.total == Decimal("862.25")
+    assert not cost.recalculate_needed()
+
+
+def test_cost_settings_with_factors():
+    """Test CostSettings with enhanced factors."""
+    settings = CostSettings(
+        fuel_prices={"PL": Decimal("6.50"), "DE": Decimal("7.20")},
+        driver_rates={"PL": Decimal("25.00"), "DE": Decimal("35.00")},
+        toll_rates={"PL": Decimal("0.15"), "DE": Decimal("0.20")},
+        maintenance_rate_per_km=Decimal("0.15"),
+        rest_period_rate=Decimal("30.00"),
+        loading_unloading_rate=Decimal("40.00"),
+        empty_driving_factors={
+            "fuel": Decimal("0.85"),
+            "toll": Decimal("1.00"),
+            "driver": Decimal("1.00")
+        },
+        cargo_factors={
+            "refrigerated": {
+                "weight": Decimal("0.001"),
+                "volume": Decimal("0.05"),
+                "temperature": Decimal("2.50")
+            }
+        },
+        overhead_rates={
+            "distance": Decimal("0.10"),
+            "time": Decimal("15.00"),
+            "fixed": Decimal("100.00")
+        }
+    )
+    
+    assert settings.get_fuel_price("PL") == Decimal("6.50")
+    assert settings.get_driver_rate("DE") == Decimal("35.00")
+    assert settings.get_toll_rate("PL") == Decimal("0.15")
+    assert settings.get_cargo_factors("refrigerated") == {
+        "weight": Decimal("0.001"),
+        "volume": Decimal("0.05"),
+        "temperature": Decimal("2.50")
+    }
+
+
+def test_time_window_validation():
+    """Test TimeWindow validation."""
+    now = datetime.now(UTC)
+    with pytest.raises(ValidationError):
+        TimeWindow(
+            location=Location(address="Warsaw", latitude=52.23, longitude=21.01),
+            earliest=now + timedelta(hours=2),
+            latest=now + timedelta(hours=1),  # Invalid: latest before earliest
+            operation_type="pickup",
+            duration_hours=1.0
+        )
+
+
+def test_vehicle_spec_validation():
+    """Test VehicleSpecification validation."""
+    with pytest.raises(ValidationError):
+        VehicleSpecification(
+            vehicle_type="reefer_truck",
+            fuel_consumption_rate=-1.0,  # Invalid: negative consumption
+            empty_consumption_factor=0.85,
+            maintenance_rate_per_km=Decimal("0.15"),
+            toll_class="heavy"
+        )
+
+
+def test_cargo_spec_validation():
+    """Test CargoSpecification validation."""
+    with pytest.raises(ValidationError):
+        CargoSpecification(
+            cargo_type="refrigerated",
+            weight_kg=-100.0,  # Invalid: negative weight
+            volume_m3=20.0,
+            temperature_controlled=True,
+            required_temp_celsius=-18.0
+        )
 
 
 def test_route_creation():

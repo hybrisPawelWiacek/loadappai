@@ -1,7 +1,7 @@
 flask==3.0.0
 streamlit==1.29.0
-pydantic==2.3.0
-pydantic-core==2.6.3
+pydantic==2.5.2
+pydantic-core==2.14.5
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 googlemaps==4.10.0
@@ -11,5 +11,8 @@ alembic==1.13.1
 python-dateutil==2.8.2
 requests==2.31.0
 flask-cors==4.0.0
-folium==0.15.1
-streamlit-folium==0.17.4
+folium==0.15.0
+streamlit-folium==0.15.0
+structlog==23.2.0
+flask-restful==0.3.10
+gunicorn==21.2.0
