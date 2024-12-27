@@ -4,617 +4,527 @@ Below is a proposed **API Specification & Contract Document** for the PoC scope 
 
 # LoadApp.AI API Specification & Contract Document (PoC)
 
-**Version:** 1.5  
-**Date:** December 22, 2024  
-**Last Updated:** December 22, 2024
+**Version:** 2.0  
+**Date:** December 24, 2024  
+**Last Updated:** December 24, 2024
 
 ## 1. Overview
 
-This document specifies the API contract for the LoadApp.AI Proof of Concept, focusing on route planning, cost calculation, and offer generation.
+This document specifies the API contract for LoadApp.AI, focusing on route planning, cost calculation, offer generation, and system settings management. The API is organized into four main domains:
+
+1. Routes: Managing transportation routes and segments
+2. Costs: Handling cost calculations and settings
+3. Offers: Managing price offers and versions
+4. Settings: System-wide configuration
 
 ## 2. API Standards
 
-### 2.1 Request Headers
+### 2.1 Base URL
 
-All requests must include:
-```
-X-API-Version: 1.5
-X-Client-ID: string
-X-Request-ID: uuid
-X-Correlation-ID: uuid (optional)
-If-Match: "entity-version" (for updates)
-```
+All endpoints are prefixed with `/api/v1`
 
-### 2.2 Response Headers
+### 2.2 Authentication
 
-All responses include:
+Authentication is handled via API keys in the request header:
 ```
-X-API-Version: 1.5
-X-Request-ID: uuid (echo)
-X-Response-Time-Ms: number
-ETag: "entity-version"
+Authorization: Bearer <api_key>
 ```
 
-### 2.3 Error Response Format
-
-```json
-{
-  "status": "error",
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "Human readable message",
-    "details": {
-      "field": "validation details",
-      "context": "additional context"
-    },
-    "correlationId": "uuid",
-    "timestamp": "ISO-8601"
-  }
-}
-```
-
-### 2.4 Validation Rules
-
-All endpoints enforce:
-- Required fields presence
-- Data type correctness
-- Value range constraints
-- Business rule compliance
-- Version control checks
-
-## 2. Common Models
-
-### 2.1 Location
-```json
-{
-  "address": "Sample Street 123",
-  "city": "Berlin",
-  "country": "DE",
-  "postal_code": "10115",
-  "coordinates": {
-    "lat": 52.52,
-    "lng": 13.405
-  }
-}
-```
-
-### 2.2 TimeWindow
-```json
-{
-  "earliest": "2024-12-22T08:00:00Z",
-  "latest": "2024-12-22T18:00:00Z",
-  "duration_minutes": 30
-}
-```
-
-### 2.3 TransportType
-```json
-{
-  "type": "TRUCK",
-  "capacity_kg": 24000,
-  "length_meters": 13.6,
-  "special_equipment": ["TAIL_LIFT", "COOLING"]
-}
-```
-
-### 2.4 CargoSpecification
-```json
-{
-  "weight_kg": 18000,
-  "volume_m3": 80,
-  "requires_cooling": true,
-  "hazmat_class": null,
-  "special_requirements": ["TAIL_LIFT"]
-}
-```
-
-### 2.5 RouteSegment
-```json
-{
-  "id": "uuid",
-  "start_location": {
-    // Location object
-  },
-  "end_location": {
-    // Location object
-  },
-  "distance_km": 450.5,
-  "duration_minutes": 320,
-  "country": "DE",
-  "is_empty_driving": false,
-  "timeline_event": {
-    "type": "PICKUP",
-    "planned_time": "2024-12-22T09:00:00Z",
-    "duration_minutes": 30
-  }
-}
-```
-
-### 2.6 TimelineEvent
-```json
-{
-  "type": "PICKUP | DELIVERY | REST | BORDER_CROSSING",
-  "location": {
-    // Location object
-  },
-  "planned_time": "2024-12-22T09:00:00Z",
-  "duration_minutes": 30,
-  "notes": "Optional event notes"
-}
-```
-
-## 3. Endpoints
-
-### 3.1 Route Planning
-
-#### POST `/routes`
-
-**Description:**  
-Create a new route with detailed segments and timeline.
+### 2.3 Common Headers
 
 **Request Headers:**
 ```
 Content-Type: application/json
-X-API-Version: 1.5
-X-Client-ID: string
+Accept: application/json
 X-Request-ID: uuid
-```
-
-**Request Body:**
-```json
-{
-  "pickup": {
-    "location": {
-      "address": "string",
-      "city": "string",
-      "country": "string",
-      "postal_code": "string",
-      "coordinates": {
-        "lat": "number",
-        "lng": "number"
-      }
-    },
-    "time_window": {
-      "earliest": "ISO-8601",
-      "latest": "ISO-8601",
-      "duration_minutes": "number"
-    }
-  },
-  "delivery": {
-    "location": {
-      // Location object
-    },
-    "time_window": {
-      // TimeWindow object
-    }
-  },
-  "transport_type": {
-    "type": "string",
-    "capacity_kg": "number",
-    "length_meters": "number",
-    "special_equipment": ["string"]
-  },
-  "cargo": {
-    "weight_kg": "number",
-    "volume_m3": "number",
-    "requires_cooling": "boolean",
-    "hazmat_class": "string?",
-    "special_requirements": ["string"]
-  },
-  "metadata": {
-    // Optional custom fields
-  }
-}
-```
-
-**Validation Rules:**
-```json
-{
-  "pickup.location": {
-    "required": true,
-    "address": "non-empty string",
-    "coordinates": {
-      "lat": "number between -90 and 90",
-      "lng": "number between -180 and 180"
-    }
-  },
-  "time_windows": {
-    "earliest": "must be future date",
-    "latest": "must be after earliest",
-    "duration": "positive number"
-  },
-  "transport_type": {
-    "type": "must be valid enum value",
-    "capacity": "positive number",
-    "equipment": "valid equipment codes"
-  },
-  "cargo": {
-    "weight": "positive number <= transport capacity",
-    "volume": "positive number",
-    "requirements": "must match transport equipment"
-  }
-}
-```
-
-**Response (201):**
-```json
-{
-  "data": {
-    "id": "uuid",
-    "version": "string",
-    "segments": [
-      {
-        "id": "uuid",
-        "version": "string",
-        "start_location": {
-          // Location object
-        },
-        "end_location": {
-          // Location object
-        },
-        "distance_km": "number",
-        "duration_minutes": "number",
-        "country": "string",
-        "is_empty_driving": "boolean",
-        "timeline_event": {
-          "type": "string",
-          "planned_time": "ISO-8601",
-          "duration_minutes": "number"
-        }
-      }
-    ],
-    "timeline": [
-      {
-        "type": "string",
-        "version": "string",
-        "location": {
-          // Location object
-        },
-        "planned_time": "ISO-8601",
-        "duration_minutes": "number",
-        "notes": "string?"
-      }
-    ],
-    "metrics": {
-      "total_distance_km": "number",
-      "total_duration_minutes": "number",
-      "empty_driving_km": "number",
-      "empty_driving_minutes": "number",
-      "countries_crossed": ["string"]
-    },
-    "feasibility": {
-      "is_feasible": "boolean",
-      "warnings": ["string"],
-      "validation_details": {
-        // Detailed validation results
-      }
-    },
-    "metadata": {
-      // Echo of request metadata
-    },
-    "created_at": "ISO-8601",
-    "updated_at": "ISO-8601"
-  }
-}
-```
-
-**Error Responses:**
-
-1. Invalid Request (400):
-```json
-{
-  "status": "error",
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid request data",
-    "details": {
-      "pickup.location.address": "Address is required",
-      "time_window.earliest": "Must be future date"
-    }
-  }
-}
-```
-
-2. Business Rule Violation (422):
-```json
-{
-  "status": "error",
-  "error": {
-    "code": "BUSINESS_RULE_VIOLATION",
-    "message": "Route planning failed",
-    "details": {
-      "rule": "MIN_DELIVERY_WINDOW",
-      "required": "4 hours",
-      "provided": "2 hours"
-    }
-  }
-}
-```
-
-3. Version Conflict (409):
-```json
-{
-  "status": "error",
-  "error": {
-    "code": "VERSION_CONFLICT",
-    "message": "Entity has been modified",
-    "details": {
-      "current_version": "string",
-      "provided_version": "string"
-    }
-  }
-}
-```
-
-#### GET `/routes/{id}`
-
-**Description:**  
-Retrieve a route with all its details.
-
-**Path Parameters:**
-- `id`: Route UUID
-
-**Request Headers:**
-```
-X-API-Version: 1.5
-X-Client-ID: string
-X-Request-ID: uuid
-If-None-Match: "entity-version" (optional)
 ```
 
 **Response Headers:**
 ```
-ETag: "entity-version"
-Last-Modified: "HTTP-date"
+Content-Type: application/json
+X-Request-ID: uuid (echo)
+X-Response-Time-Ms: number
 ```
 
-**Response (200):**
+### 2.4 Error Response Format
+
 ```json
 {
-  "data": {
-    // Same as POST /routes response
+  "error": "Human readable error message",
+  "code": "ERROR_CODE",
+  "details": {
+    "field": "validation details",
+    "context": "additional context"
   }
 }
 ```
 
-**Error Responses:**
-- 304 Not Modified (if ETag matches)
-- 404 Not Found (with error details)
-- 500 Internal Server Error (with error details)
+Common Error Codes:
+- `NOT_FOUND`: Resource not found
+- `VALIDATION_ERROR`: Invalid input data
+- `INTERNAL_ERROR`: Server error
+- `GEOCODING_ERROR`: Address geocoding failed
 
-### 3.2 Cost Calculation
+## 3. Routes API
 
-#### POST `/routes/{id}/cost`
+### 3.1 Create Route
+**POST** `/routes`
 
-**Description:**  
-Calculate detailed cost breakdown for a route.
+Creates a new route with origin and destination.
 
-**Path Parameters:**
-- `id`: Route UUID
-
-**Request Headers:**
-```
-X-API-Version: 1.5
-X-Client-ID: string
-X-Request-ID: uuid
-If-Match: "route-version"
-```
-
-**Request Body:**
+**Request:**
 ```json
 {
-  "settings_version": "string",
-  "cost_factors": {
-    "fuel_price_per_liter": "number",
-    "driver_cost_per_hour": "number",
-    "empty_driving_factor": "number"
-  },
+  "origin": "Warsaw, Poland",
+  "destination": "Berlin, Germany",
+  "cargo_weight": 1000,
+  "cargo_volume": 500,
   "metadata": {
-    // Optional custom fields
+    "customer_id": "string",
+    "reference": "string"
   }
 }
 ```
 
-**Response (200):**
+**Response:** (201 Created)
 ```json
 {
-  "data": {
-    "id": "uuid",
-    "version": "string",
-    "route_id": "uuid",
-    "route_version": "string",
-    "settings_version": "string",
-    "breakdown": {
-      "fuel_cost": "number",
-      "driver_cost": "number",
-      "empty_driving_cost": "number",
-      "additional_costs": [
-        {
-          "type": "string",
-          "amount": "number",
-          "description": "string"
-        }
-      ]
-    },
-    "total": "number",
-    "currency": "string",
-    "metadata": {
-      // Echo of request metadata
-    },
-    "created_at": "ISO-8601"
+  "id": "uuid",
+  "origin": "Warsaw, Poland",
+  "destination": "Berlin, Germany",
+  "distance": 575.0,
+  "duration": 6.5,
+  "segments": [],
+  "created_at": "2024-12-24T10:00:00Z",
+  "modified_at": "2024-12-24T10:00:00Z",
+  "metadata": {
+    "cargo_weight": 1000,
+    "cargo_volume": 500,
+    "customer_id": "string",
+    "reference": "string"
   }
 }
 ```
 
-### 3.3 Offer Management
+### 3.2 Get Route
+**GET** `/routes/{route_id}`
 
-#### POST `/offers`
+Retrieves a route by ID.
 
-**Description:**  
-Generate an offer based on route and cost calculation.
-
-**Request Headers:**
+**Response:** (200 OK)
+```json
+{
+  "id": "uuid",
+  "origin": "Warsaw, Poland",
+  "destination": "Berlin, Germany",
+  "distance": 575.0,
+  "duration": 6.5,
+  "segments": [
+    {
+      "start_address": "Warsaw, Poland",
+      "end_address": "Poznan, Poland",
+      "distance": 310.0,
+      "duration": 3.5,
+      "type": "LOADED"
+    }
+  ],
+  "created_at": "2024-12-24T10:00:00Z",
+  "modified_at": "2024-12-24T10:00:00Z",
+  "metadata": {
+    "cargo_weight": 1000,
+    "cargo_volume": 500
+  }
+}
 ```
-X-API-Version: 1.5
-X-Client-ID: string
-X-Request-ID: uuid
-If-Match: "cost-version"
+
+### 3.3 Update Route
+**PUT** `/routes/{route_id}`
+
+Updates an existing route.
+
+**Request:**
+```json
+{
+  "destination": "Frankfurt, Germany",
+  "cargo_weight": 1200,
+  "metadata": {
+    "priority": "high"
+  }
+}
 ```
 
-**Request Body:**
+**Response:** (200 OK)
+```json
+{
+  "id": "uuid",
+  "origin": "Warsaw, Poland",
+  "destination": "Frankfurt, Germany",
+  "distance": 1000.0,
+  "duration": 9.5,
+  "segments": [],
+  "modified_at": "2024-12-24T11:00:00Z",
+  "metadata": {
+    "cargo_weight": 1200,
+    "cargo_volume": 500,
+    "priority": "high"
+  }
+}
+```
+
+### 3.4 Delete Route
+**DELETE** `/routes/{route_id}`
+
+Deletes a route.
+
+**Response:** (200 OK)
+```json
+{
+  "message": "Route deleted successfully"
+}
+```
+
+### 3.5 List Routes
+**GET** `/routes`
+
+Lists routes with optional filtering.
+
+**Query Parameters:**
+- `origin`: Filter by origin city/country
+- `destination`: Filter by destination city/country
+- `page`: Page number (default: 1)
+- `per_page`: Items per page (default: 10)
+
+**Response:** (200 OK)
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "origin": "Warsaw, Poland",
+      "destination": "Berlin, Germany",
+      "distance": 575.0,
+      "duration": 6.5
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "per_page": 10,
+    "total": 100
+  }
+}
+```
+
+### 3.6 Calculate Empty Driving
+**POST** `/routes/{route_id}/empty-driving`
+
+Calculates empty driving segments for a route.
+
+**Response:** (200 OK)
+```json
+{
+  "segments": [
+    {
+      "start_address": "Berlin, Germany",
+      "end_address": "Warsaw, Poland",
+      "distance": 575.0,
+      "duration": 6.5,
+      "type": "EMPTY"
+    }
+  ]
+}
+```
+
+## 4. Costs API
+
+### 4.1 Calculate Route Costs
+**POST** `/costs/routes/{route_id}/calculate`
+
+Calculates costs for a route.
+
+**Response:** (200 OK)
+```json
+{
+  "id": "uuid",
+  "route_id": "uuid",
+  "total_cost": 1000.0,
+  "fuel_cost": 400.0,
+  "maintenance_cost": 150.0,
+  "driver_cost": 450.0,
+  "currency": "EUR",
+  "created_at": "2024-12-24T10:00:00Z",
+  "metadata": {
+    "fuel_consumption": 28.5,
+    "total_distance": 575.0,
+    "total_duration": 6.5
+  }
+}
+```
+
+### 4.2 Get Route Cost Settings
+**GET** `/costs/routes/{route_id}/settings`
+
+Gets cost settings for a specific route.
+
+**Response:** (200 OK)
 ```json
 {
   "route_id": "uuid",
-  "cost_id": "uuid",
-  "margin_percentage": "number",
-  "validity_hours": "number",
-  "metadata": {
-    // Optional custom fields
-  }
+  "fuel_consumption": 28.5,
+  "additional_cost_per_km": 0.05,
+  "custom_driver_cost_per_hour": 30.0,
+  "currency": "EUR",
+  "created_at": "2024-12-24T10:00:00Z",
+  "modified_at": "2024-12-24T10:00:00Z"
 }
 ```
 
-**Response (201):**
+### 4.3 Update Route Cost Settings
+**PUT** `/costs/routes/{route_id}/settings`
+
+Updates cost settings for a specific route.
+
+**Request:**
 ```json
 {
-  "data": {
-    "id": "uuid",
-    "version": "string",
-    "route_id": "uuid",
-    "route_version": "string",
-    "cost_id": "uuid",
-    "cost_version": "string",
-    "price": {
-      "net_amount": "number",
-      "tax_amount": "number",
-      "total_amount": "number",
-      "currency": "string"
-    },
-    "status": "string",
-    "valid_until": "ISO-8601",
-    "metadata": {
-      // Echo of request metadata
-    },
-    "created_at": "ISO-8601",
-    "updated_at": "ISO-8601"
+  "fuel_consumption": 30.0,
+  "additional_cost_per_km": 0.06,
+  "custom_driver_cost_per_hour": 32.0
+}
+```
+
+**Response:** (200 OK)
+```json
+{
+  "route_id": "uuid",
+  "fuel_consumption": 30.0,
+  "additional_cost_per_km": 0.06,
+  "custom_driver_cost_per_hour": 32.0,
+  "currency": "EUR",
+  "modified_at": "2024-12-24T11:00:00Z"
+}
+```
+
+## 5. Offers API
+
+### 5.1 Get Offer
+**GET** `/offers/{offer_id}`
+
+Retrieves an offer by ID.
+
+**Query Parameters:**
+- `version`: Specific version to retrieve
+- `include_history`: Include version history (boolean)
+
+**Response:** (200 OK)
+```json
+{
+  "id": "uuid",
+  "route_id": "uuid",
+  "status": "DRAFT",
+  "margin": 0.15,
+  "total_cost": 1000.0,
+  "offer_price": 1150.0,
+  "currency": "EUR",
+  "version": 1,
+  "created_at": "2024-12-24T10:00:00Z",
+  "modified_at": "2024-12-24T10:00:00Z",
+  "metadata": {
+    "key": "value"
+  },
+  "history": [
+    {
+      "version": 1,
+      "status": "DRAFT",
+      "margin": 0.15,
+      "offer_price": 1150.0,
+      "modified_at": "2024-12-24T10:00:00Z",
+      "modified_by": "user1",
+      "change_reason": "Initial creation"
+    }
+  ]
+}
+```
+
+### 5.2 Update Offer
+**PUT** `/offers/{offer_id}`
+
+Updates an existing offer.
+
+**Request:**
+```json
+{
+  "margin": 0.18,
+  "status": "SENT",
+  "modified_by": "user2",
+  "change_reason": "Price adjustment"
+}
+```
+
+**Response:** (200 OK)
+```json
+{
+  "id": "uuid",
+  "status": "SENT",
+  "margin": 0.18,
+  "total_cost": 1000.0,
+  "offer_price": 1180.0,
+  "version": 2,
+  "modified_at": "2024-12-24T11:00:00Z"
+}
+```
+
+### 5.3 Archive Offer
+**POST** `/offers/{offer_id}/archive`
+
+Archives an offer.
+
+**Request:**
+```json
+{
+  "archived_by": "user1",
+  "archive_reason": "No longer needed"
+}
+```
+
+**Response:** (200 OK)
+```json
+{
+  "id": "uuid",
+  "status": "ARCHIVED",
+  "version": 3,
+  "modified_at": "2024-12-24T12:00:00Z"
+}
+```
+
+### 5.4 List Offers
+**GET** `/offers`
+
+Lists offers with filtering and pagination.
+
+**Query Parameters:**
+- `status`: Filter by status
+- `page`: Page number (default: 1)
+- `per_page`: Items per page (default: 10)
+
+**Response:** (200 OK)
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "route_id": "uuid",
+      "status": "DRAFT",
+      "offer_price": 1150.0,
+      "version": 1
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "per_page": 10,
+    "total": 100
   }
 }
 ```
 
-## 4. State Management
+## 6. Settings API
 
-### 4.1 Entity Versioning
+### 6.1 Cost Settings
 
-All entities include:
-- `version`: Unique version identifier
-- `created_at`: Creation timestamp
-- `updated_at`: Last update timestamp
+#### GET `/settings/cost`
+Retrieves current cost settings.
 
-Version control is enforced via:
-- `If-Match` header for updates
-- `If-None-Match` header for reads
-- Version conflict errors (409)
-
-### 4.2 Caching
-
-Responses include:
-- `ETag` header with entity version
-- `Cache-Control` headers
-- `Last-Modified` header
-
-### 4.3 Idempotency
-
-Guaranteed via:
-- `X-Request-ID` header
-- Idempotency keys in response
-- 409 Conflict for duplicate requests
-
-## 5. Error Codes
-
-### 5.1 Validation Errors (400)
-- `INVALID_INPUT`: General validation failure
-- `MISSING_REQUIRED`: Required field missing
-- `INVALID_FORMAT`: Wrong data format
-- `INVALID_VALUE`: Value out of allowed range
-
-### 5.2 Business Errors (422)
-- `ROUTE_NOT_FEASIBLE`: Route cannot be planned
-- `COST_CALCULATION_FAILED`: Cost calculation error
-- `OFFER_GENERATION_FAILED`: Offer creation error
-
-### 5.3 System Errors (500)
-- `INTERNAL_ERROR`: Unexpected system error
-- `EXTERNAL_SERVICE_ERROR`: Third-party service failure
-- `DATABASE_ERROR`: Database operation failed
-
-## 6. Future Extensions
-
-Planned additions:
-- Batch operations for routes and offers
-- Real-time route updates
-- Webhook notifications
-- Advanced filtering and search
-- Rate limiting and quotas
-
-## 7. General Conventions
-
-### 7.1 Date/Time Fields
-
-- All date/time fields in ISO 8601 format with UTC time (`YYYY-MM-DDTHH:MM:SSZ`).
-
-### 7.2 Currencies
-
-- PoC: Fixed to `"EUR"`. In future versions, currency might be configurable or dynamic.
-
-### 7.3 Pagination and Filtering
-
-- All list endpoints support pagination with `page` and `per_page` parameters
-- Filtering options vary by endpoint and are documented in the endpoint specifications
-
-### 7.4 Validation Rules
-
-- Coordinates: latitude must be between -90 and 90, longitude between -180 and 180
-- Times: `pickup_time` must be before `delivery_time`
-- Margin: must be >= 0 and <= 1.0
-- Status transitions:
-  - DRAFT → ACTIVE
-  - ACTIVE → ARCHIVED
-  - No other transitions allowed
-- Version control:
-  - Version must match current version when updating
-  - Version conflicts return 409 Conflict
-- Required fields must not be null or empty strings
-
-## 8. Versioning & Deprecation
-
-- PoC: Single version (`v1`).
-- Future: Introduce `/api/v2` endpoints as needed. Older endpoints will remain functional for a defined deprecation period.
-
-## 9. Examples & Curl Commands
-
-**Create a Route:**
-```bash
-curl -X POST http://localhost:5000/api/v1/routes \
-  -H "Content-Type: application/json" \
-  -d '{
-        "pickup": {
-          "location": {"address": "Paris, France", "latitude":48.8566,"longitude":2.3522},
-          "time_window": {"earliest": "2024-12-22T08:00:00Z", "latest": "2024-12-22T18:00:00Z", "duration_minutes": 30}
-        },
-        "delivery": {
-          "location": {"address":"Frankfurt, Germany","latitude":50.1109,"longitude":8.6821},
-          "time_window": {"earliest": "2024-12-22T09:00:00Z", "latest": "2024-12-22T19:00:00Z", "duration_minutes": 30}
-        },
-        "transport_type": {"type": "TRUCK", "capacity_kg": 24000, "length_meters": 13.6, "special_equipment": ["TAIL_LIFT", "COOLING"]},
-        "cargo": {"weight_kg": 18000, "volume_m3": 80, "requires_cooling": true, "hazmat_class": null, "special_requirements": ["TAIL_LIFT"]}
-      }'
+**Response:** (200 OK)
+```json
+{
+  "fuel_prices": {
+    "PL": 1.5,
+    "DE": 1.8,
+    "FR": 1.7
+  },
+  "maintenance_cost_per_km": 0.15,
+  "driver_cost_per_hour": 25.0,
+  "base_cost_multiplier": 1.2,
+  "currency": "EUR"
+}
 ```
 
-**Get Route Cost:**
-```bash
-curl http://localhost:5000/api/v1/routes/<route_id>/cost
+#### PUT `/settings/cost`
+Updates cost settings.
+
+**Request:**
+```json
+{
+  "fuel_prices": {
+    "PL": 1.6
+  },
+  "maintenance_cost_per_km": 0.16
+}
 ```
 
-## 10. Conclusion
+### 6.2 Transport Settings
 
-This API Specification & Contract Document provides a clear reference for how to interact with the LoadApp.AI backend in the PoC phase. By adhering to these definitions, both human developers and the AI Dev Agent can confidently implement and integrate the system’s frontend and backend components.
+#### GET `/settings/transport`
+Retrieves transport settings.
+
+**Response:** (200 OK)
+```json
+{
+  "max_driving_time": 9,
+  "max_working_time": 13,
+  "break_duration": 0.75,
+  "daily_rest_duration": 11,
+  "speed_empty": 75,
+  "speed_loaded": 68
+}
+```
+
+#### PUT `/settings/transport`
+Updates transport settings.
+
+**Request:**
+```json
+{
+  "speed_empty": 80,
+  "speed_loaded": 70
+}
+```
+
+### 6.3 System Settings
+
+#### GET `/settings/system`
+Retrieves system settings.
+
+**Response:** (200 OK)
+```json
+{
+  "default_currency": "EUR",
+  "distance_unit": "km",
+  "time_zone": "UTC",
+  "language": "en"
+}
+```
+
+#### PUT `/settings/system`
+Updates system settings.
+
+**Request:**
+```json
+{
+  "language": "pl",
+  "time_zone": "Europe/Warsaw"
+}
+```
+
+## 7. Versioning
+
+The API uses semantic versioning (MAJOR.MINOR) and is currently at version 2.0. Breaking changes will increment the MAJOR version, while backward-compatible changes will increment the MINOR version.
+
+## 8. Rate Limiting
+
+- 1000 requests per minute per API key
+- Rate limit headers included in responses:
+  ```
+  X-RateLimit-Limit: 1000
+  X-RateLimit-Remaining: 999
+  X-RateLimit-Reset: 1640390400
+  ```

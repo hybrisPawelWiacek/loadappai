@@ -50,9 +50,34 @@ def display_offer(offer: TransportOffer):
     )
     offer_logger.info("displaying_offer", price=str(offer.price), margin=str(offer.margin_amount))
     
+    # Add container styling
+    st.markdown("""
+        <style>
+        div[data-testid="stExpander"] {
+            width: 100% !important;
+            margin-bottom: 1rem !important;
+        }
+        div.row-widget.stRadio > div {
+            width: 100% !important;
+        }
+        div[data-testid="column"] {
+            width: 100% !important;
+        }
+        div.element-container {
+            width: 100% !important;
+        }
+        div[data-testid="metric-container"] {
+            padding: 1rem;
+            background: rgba(28, 131, 225, 0.1);
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     with st.container():
-        # Header with key metrics
-        col1, col2, col3 = st.columns(3)
+        # Header with key metrics in a single row
+        col1, col2, col3 = st.columns([2, 1, 1])
         
         with col1:
             st.metric(
@@ -65,32 +90,31 @@ def display_offer(offer: TransportOffer):
         with col2:
             st.metric(
                 "Pickup",
-                offer.pickup_date.strftime("%Y-%m-%d %H:%M")
+                offer.pickup_date.strftime("%Y-%m-%d")
             )
             offer_logger.debug("displayed_pickup_metric", pickup_date=offer.pickup_date.isoformat())
         
         with col3:
             st.metric(
                 "Delivery",
-                offer.delivery_date.strftime("%Y-%m-%d %H:%M")
+                offer.delivery_date.strftime("%Y-%m-%d")
             )
             offer_logger.debug("displayed_delivery_metric", delivery_date=offer.delivery_date.isoformat())
         
-        # Detailed sections
+        # Transport Details in a full-width expander
         with st.expander("Transport Details", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
+            cols = st.columns(2)
+            with cols[0]:
                 st.write("**Transport Type:**", offer.transport_type)
                 st.write("**Base Cost:**", f"€{float(offer.base_cost):,.2f}")
                 offer_logger.debug("displayed_transport_details", transport_type=offer.transport_type, base_cost=str(offer.base_cost))
             
-            with col2:
+            with cols[1]:
                 st.write("**Cargo Type:**", offer.cargo_type)
                 st.write("**Margin Amount:**", f"€{float(offer.margin_amount):,.2f}")
                 offer_logger.debug("displayed_cargo_details", cargo_type=offer.cargo_type, margin_amount=str(offer.margin_amount))
         
-        # Route description
+        # Route Description in a full-width expander
         with st.expander("Route Description", expanded=True):
             st.write(offer.route_description)
             offer_logger.debug("displayed_route_description", route_description=offer.route_description)
@@ -113,6 +137,176 @@ def display_offer(offer: TransportOffer):
                 offer_logger.debug("displayed_notes", notes=offer.notes)
         
         st.markdown("---")
+
+def display_final_offer(offer_id: str):
+    """Display the final offer after creation."""
+    offer_logger = logger.bind(component="final_offer_display")
+    
+    try:
+        # Get offer data from API
+        api_client = st.session_state.api_client
+        offer_data = api_client.get_offer(offer_id)
+        
+        st.header("Final Offer")
+        
+        # Display price and margin
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                "Final Price",
+                f"€{float(offer_data['final_price']):,.2f}",
+                delta=f"Margin: {float(offer_data['margin']):,.1f}%"
+            )
+        with col2:
+            st.metric(
+                "Base Cost",
+                f"€{float(offer_data['total_cost']):,.2f}"
+            )
+        with col3:
+            st.metric(
+                "Margin Amount",
+                f"€{float(offer_data['final_price'] - offer_data['total_cost']):,.2f}"
+            )
+        
+        # Transport Details
+        with st.expander("Transport Details", expanded=True):
+            st.write(f"**Transport Type:** {offer_data.get('transport_type', 'Standard Truck')}")
+            st.write(f"**Cargo Type:** {offer_data.get('cargo_type', 'General Cargo')}")
+            
+            # Display fun fact if available
+            if 'fun_fact' in offer_data and offer_data['fun_fact']:
+                st.info(f"**Did you know?** {offer_data['fun_fact']}")
+        
+        # Additional Services
+        if offer_data.get('additional_services'):
+            with st.expander("Additional Services"):
+                for service in offer_data['additional_services']:
+                    st.write(f"- {service}")
+        
+        # Notes
+        if offer_data.get('notes'):
+            with st.expander("Notes"):
+                st.write(offer_data['notes'])
+        
+        # Add button to create new offer
+        if st.button("Create New Offer", use_container_width=True):
+            # Clear all relevant session state
+            keys_to_clear = ['final_offer_id', 'offer_preview']
+            for key in keys_to_clear:
+                if hasattr(st.session_state, key):
+                    delattr(st.session_state, key)
+            st.rerun()
+        
+    except Exception as e:
+        st.error("An error occurred while loading the offer")
+        offer_logger.error("Error loading offer", error=str(e))
+        traceback.print_exc()
+
+def display_offer_preview(
+    offer_settings: Dict,
+    base_cost: Decimal,
+    route_description: str,
+    fun_fact: Optional[str] = None
+):
+    """Display a preview of the offer before finalizing."""
+    offer_logger = logger.bind(component="offer_preview")
+    
+    # Calculate pricing
+    margin_percentage = Decimal(str(offer_settings["margin_percentage"]))
+    margin_amount = base_cost * (margin_percentage / Decimal("100"))
+    final_price = base_cost + margin_amount
+    
+    # Create offer object for preview
+    preview_offer = TransportOffer(
+        id=str(uuid.uuid4()),
+        price=final_price,
+        base_cost=base_cost,
+        margin_percentage=float(margin_percentage),
+        pickup_date=st.session_state.get("pickup_time", datetime.now()),
+        delivery_date=st.session_state.get("delivery_time", datetime.now()),
+        transport_type=offer_settings["transport_type"],
+        cargo_type=offer_settings["cargo_type"],
+        route_description=route_description,
+        fun_fact=fun_fact,
+        additional_services=offer_settings["additional_services"],
+        notes=offer_settings["notes"]
+    )
+    
+    # Display the offer preview
+    st.subheader("Offer Preview")
+    display_offer(preview_offer)
+    
+    # Add action buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button(
+            "Send Offer to Client",
+            key="send_offer",
+            use_container_width=True,
+            type="primary"
+        ):
+            try:
+                # Prepare offer data
+                offer_data = {
+                    "route_id": st.session_state.get("current_route_id"),
+                    "margin": float(margin_percentage),
+                    "total_cost": float(base_cost),
+                    "transport_type": offer_settings["transport_type"],
+                    "cargo_type": offer_settings["cargo_type"],
+                    "additional_services": offer_settings["additional_services"],
+                    "notes": offer_settings["notes"] if offer_settings["notes"] else None,
+                    "fun_fact": fun_fact
+                }
+                
+                # Log the request
+                offer_logger.info(
+                    "sending_offer",
+                    route_id=offer_data["route_id"],
+                    margin=offer_data["margin"],
+                    total_cost=offer_data["total_cost"]
+                )
+                
+                # Send to API
+                if not hasattr(st.session_state, "api_client"):
+                    raise Exception("API client not initialized")
+                
+                response_data = st.session_state.api_client.create_offer(offer_data)
+                
+                # Store offer ID and clear preview
+                if "id" in response_data:
+                    st.session_state.final_offer_id = response_data["id"]
+                    if hasattr(st.session_state, "offer_preview"):
+                        delattr(st.session_state, "offer_preview")
+                    
+                    # Log success and rerun to show final offer
+                    offer_logger.info(
+                        "offer_created",
+                        offer_id=response_data["id"],
+                        final_price=response_data.get("final_price")
+                    )
+                    st.rerun()
+                else:
+                    raise Exception("Response missing offer ID")
+                
+            except Exception as e:
+                offer_logger.error(
+                    "offer_creation_failed", 
+                    error=str(e),
+                    response=str(response_data) if 'response_data' in locals() else None
+                )
+                st.error(f"Failed to create offer: {str(e)}")
+                traceback.print_exc()
+    
+    with col2:
+        if st.button(
+            "Edit Offer",
+            key="edit_offer",
+            use_container_width=True
+        ):
+            if hasattr(st.session_state, "offer_preview"):
+                delattr(st.session_state, "offer_preview")
+            st.rerun()
 
 def render_offer_controls(base_cost: Optional[Decimal] = None):
     """Render offer generation controls and settings.
@@ -226,194 +420,86 @@ def render_offer_controls(base_cost: Optional[Decimal] = None):
     
     return None
 
-def display_offer_preview(
-    offer_settings: Dict,
-    base_cost: Decimal,
-    route_description: str,
-    fun_fact: Optional[str] = None
-):
-    """Display a preview of the offer before finalizing.
-    
-    Args:
-        offer_settings: Settings from render_offer_controls
-        base_cost: Base cost for the transport
-        route_description: Description of the route
-        fun_fact: Optional fun fact about the route
-    """
-    offer_logger = logger.bind(
-        component="offer_preview",
-        route_id=st.session_state.get("current_route_id")
-    )
-    offer_logger.info(
-        "displaying_offer_preview",
-        base_cost=str(base_cost),
-        margin_percentage=offer_settings["margin_percentage"]
-    )
-    
-    try:
-        # Calculate pricing
-        margin_percentage = Decimal(str(offer_settings["margin_percentage"]))
-        margin_amount = base_cost * (margin_percentage / Decimal("100"))
-        final_price = base_cost + margin_amount
-        
-        offer_logger.debug(
-            "calculated_offer_prices",
-            margin_amount=str(margin_amount),
-            final_price=str(final_price)
-        )
-        
-        # Create offer object for preview
-        offer = TransportOffer(
-            id=str(uuid.uuid4()),
-            price=final_price,
-            base_cost=base_cost,
-            margin_percentage=float(margin_percentage),
-            pickup_date=datetime.now(),
-            delivery_date=datetime.now() + timedelta(days=2),
-            transport_type=offer_settings["transport_type"],
-            cargo_type=offer_settings["cargo_type"],
-            route_description=route_description,
-            fun_fact=fun_fact,
-            additional_services=offer_settings["additional_services"],
-            notes=offer_settings["notes"]
-        )
-        
-        offer_logger.info(
-            "created_offer_preview",
-            offer_id=offer.id,
-            price=str(offer.price),
-            transport_type=offer.transport_type
-        )
-        
-        # Display the offer preview
-        display_offer(offer)
-        
-        # Add action buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Send Offer to Client", key="send_offer"):
-                try:
-                    # Ensure API client is initialized
-                    if "api_client" not in st.session_state:
-                        offer_logger.warning("api_client_missing_reinitializing")
-                        st.session_state.api_client = APIClient(
-                            base_url="http://localhost:5001",
-                            api_key="development"
-                        )
-                        offer_logger.info("api_client_reinitialized")
-                    
-                    # Prepare offer data for API
-                    offer_data = {
-                        "route_id": st.session_state.get("current_route_id"),
-                        "margin": float(margin_percentage),
-                        "total_cost": float(base_cost),  # Include the base cost
-                        "transport_type": offer_settings["transport_type"],
-                        "cargo_type": offer_settings["cargo_type"],
-                        "additional_services": offer_settings["additional_services"],
-                        "notes": offer_settings["notes"] if offer_settings["notes"] else None
-                    }
-                    
-                    offer_logger.info(
-                        "sending_offer_to_api",
-                        offer_id=offer.id,
-                        route_id=offer_data["route_id"],
-                        offer_data=offer_data
-                    )
-                    
-                    # Create offer via API
-                    response = st.session_state.api_client.create_offer(offer_data)
-                    
-                    offer_logger.info(
-                        "offer_created_successfully",
-                        api_offer_id=response.get("id"),
-                        status=response.get("status")
-                    )
-                    
-                    st.success("Offer created successfully!")
-                    
-                    # Create TransportOffer object from API response
-                    final_offer = TransportOffer(
-                        id=response["id"],
-                        price=Decimal(str(response["final_price"])),
-                        base_cost=Decimal(str(response["total_cost"])),
-                        margin_percentage=float(response["margin"]),
-                        pickup_date=st.session_state.get("pickup_time", datetime.now()),
-                        delivery_date=st.session_state.get("delivery_time", datetime.now()),
-                        transport_type=offer_settings["transport_type"],
-                        cargo_type=offer_settings["cargo_type"],
-                        route_description=response.get("description", "Route description not available"),
-                        fun_fact=response.get("fun_fact"),
-                        additional_services=offer_settings["additional_services"],
-                        notes=offer_settings["notes"]
-                    )
-                    
-                    # Store final offer in session state and display it
-                    st.session_state.final_offer = final_offer
-                    st.subheader("Final Offer")
-                    display_offer(final_offer)
-                    
-                    # Hide the offer form
-                    st.session_state.show_offer_form = False
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    offer_logger.error(
-                        "error_sending_offer",
-                        error=error_msg,
-                        error_type=type(e).__name__,
-                        traceback=traceback.format_exc()
-                    )
-                    st.error(f"Error sending offer: {error_msg}")
-        
-        with col2:
-            if st.button("Edit Offer", key="edit_offer"):
-                offer_logger.info("editing_offer", offer_id=offer.id)
-                st.session_state.offer_preview = None
-                
-    except Exception as e:
-        error_msg = str(e)
-        offer_logger.error(
-            "error_displaying_preview",
-            error=error_msg,
-            error_type=type(e).__name__,
-            traceback=traceback.format_exc()
-        )
-        st.error(f"Error displaying offer preview: {error_msg}")
-
 def render_offer_generation():
     """Render the offer generation page."""
     offer_logger = logger.bind(component="offer_generation")
-    offer_logger.info("rendering_offer_generation")
     
-    # Ensure API client is initialized
-    if "api_client" not in st.session_state:
-        offer_logger.warning("api_client_missing_reinitializing")
+    # Log session state for debugging
+    offer_logger.info(
+        "session_state",
+        has_route_id=hasattr(st.session_state, "current_route_id"),
+        has_cost_data=hasattr(st.session_state, "cost_data"),
+        has_final_offer=hasattr(st.session_state, "final_offer_id"),
+        has_preview=hasattr(st.session_state, "offer_preview"),
+        route_id=getattr(st.session_state, "current_route_id", None),
+        final_offer_id=getattr(st.session_state, "final_offer_id", None)
+    )
+
+    # Initialize API client if needed
+    if not hasattr(st.session_state, "api_client"):
         st.session_state.api_client = APIClient(
             base_url="http://localhost:5001",
             api_key="development"
         )
-        offer_logger.info("api_client_reinitialized")
+        offer_logger.info("api_client_initialized")
+
+    if not hasattr(st.session_state, "current_route_id"):
+        st.error("No route selected")
+        return
+        
+    route_id = st.session_state.current_route_id
     
-    # Get the route ID from session state
-    route_id = st.session_state.get("current_route_id")
-    if not route_id:
-        offer_logger.error("route_id_not_found")
-        st.error("No route selected. Please go back and select a route.")
+    # Get cost data if not already in session
+    if not hasattr(st.session_state, "cost_data"):
+        st.error("Cost data not available")
+        return
+        
+    cost_data = st.session_state.cost_data
+    base_cost = Decimal(str(cost_data.total_cost))
+    
+    # Display final offer if available
+    if hasattr(st.session_state, "final_offer_id"):
+        offer_logger.info("displaying_final_offer", offer_id=st.session_state.final_offer_id)
+        display_final_offer(st.session_state.final_offer_id)
         return
     
-    # Get the base cost from session state
-    base_cost = st.session_state.get("base_cost")
-    
-    # Render offer controls
-    offer_settings = render_offer_controls(base_cost)
-    
-    if offer_settings:
-        # Get the route description from session state
-        route_description = st.session_state.get("route_description")
-        fun_fact = st.session_state.get("fun_fact")
+    # Display offer form if no preview
+    if not hasattr(st.session_state, "offer_preview"):
+        offer_logger.info("rendering_offer_controls")
+        offer_settings = render_offer_controls(base_cost)
         
-        # Display offer preview
-        display_offer_preview(offer_settings, base_cost, route_description, fun_fact)
+        if offer_settings:
+            # Generate route description
+            route_description = f"Transport from {st.session_state.origin_address} to {st.session_state.destination_address}"
+            
+            # Store preview in session state
+            st.session_state.offer_preview = {
+                "settings": offer_settings,
+                "base_cost": base_cost,
+                "route_description": route_description
+            }
+            offer_logger.info("stored_offer_preview", settings=offer_settings)
+            st.rerun()
+            
+    # Display preview if available
+    else:
+        offer_logger.info("displaying_offer_preview")
+        preview_data = st.session_state.offer_preview
+        
+        # Get fun fact from API
+        try:
+            route_data = st.session_state.api_client.get_route(route_id)
+            fun_fact = st.session_state.api_client.generate_fun_fact({"route": route_data}).get("fun_fact")
+        except Exception as e:
+            fun_fact = None
+            offer_logger.error("Error generating fun fact", error=str(e))
+        
+        display_offer_preview(
+            preview_data["settings"],
+            preview_data["base_cost"],
+            preview_data["route_description"],
+            fun_fact=fun_fact
+        )
 
 def main():
     render_offer_generation()

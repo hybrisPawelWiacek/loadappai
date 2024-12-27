@@ -9,9 +9,18 @@ from enum import Enum
 
 class TransportType(str, Enum):
     """Valid transport types matching API specification."""
-    TRUCK = "truck"
-    VAN = "van"
-    TRAILER = "trailer"
+    TRUCK = "truck"  # Up to 24,000 kg
+    VAN = "van"      # Up to 3,500 kg
+    TRAILER = "trailer"  # Up to 40,000 kg
+
+    @property
+    def max_weight(self) -> float:
+        """Get maximum weight capacity in kg for transport type."""
+        return {
+            self.TRUCK: 24000.0,
+            self.VAN: 3500.0,
+            self.TRAILER: 40000.0
+        }[self]
 
 @dataclass
 class Location:
@@ -93,7 +102,7 @@ def render_route_form() -> Optional[RouteFormData]:
     if "form_cargo_volume" not in st.session_state:
         st.session_state.form_cargo_volume = 20.0
     if "form_cargo_type" not in st.session_state:
-        st.session_state.form_cargo_type = "General"
+        st.session_state.form_cargo_type = "General Freight"
     if "form_temp_controlled" not in st.session_state:
         st.session_state.form_temp_controlled = False
     if "form_temp_celsius" not in st.session_state:
@@ -101,7 +110,10 @@ def render_route_form() -> Optional[RouteFormData]:
     if "form_hazmat_class" not in st.session_state:
         st.session_state.form_hazmat_class = ""
     
-    with st.form("route_form"):
+    # Create a unique key for the form based on the current route ID
+    form_key = f"route_form_{st.session_state.get('current_route_id', 'new')}"
+    
+    with st.form(form_key):
         st.subheader("Route Details")
         col1, col2 = st.columns(2)
         
@@ -165,16 +177,25 @@ def render_route_form() -> Optional[RouteFormData]:
         with cargo_col1:
             cargo_weight = st.number_input(
                 "Cargo Weight (kg)",
-                value=st.session_state.form_cargo_weight,
+                value=min(st.session_state.form_cargo_weight, TransportType(transport_type).max_weight),
                 min_value=0.1,
-                help="Enter the weight of cargo in kilograms",
+                max_value=TransportType(transport_type).max_weight,
+                help=f"Enter the weight of cargo in kilograms (max {TransportType(transport_type).max_weight:,.0f} kg for {transport_type})",
                 key="cargo_weight_input"
             )
             
             cargo_type = st.selectbox(
                 "Cargo Type",
-                ["General", "Temperature Controlled", "Hazardous", "Bulk"],
-                index=["General", "Temperature Controlled", "Hazardous", "Bulk"].index(st.session_state.form_cargo_type),
+                [
+                    "General Freight",
+                    "Palletized Goods",
+                    "Temperature Controlled",
+                    "Hazardous Materials",
+                    "Bulk Materials",
+                    "Construction Materials",
+                    "Automotive Parts"
+                ],
+                index=["General Freight", "Palletized Goods", "Temperature Controlled", "Hazardous Materials", "Bulk Materials", "Construction Materials", "Automotive Parts"].index(st.session_state.form_cargo_type),
                 help="Select the type of cargo being transported",
                 key="cargo_type_input"
             )
@@ -182,6 +203,7 @@ def render_route_form() -> Optional[RouteFormData]:
             temp_controlled = st.checkbox(
                 "Temperature Controlled",
                 value=st.session_state.form_temp_controlled,
+                help="Check if cargo requires temperature control",
                 key="temp_controlled_input"
             )
         
@@ -194,20 +216,35 @@ def render_route_form() -> Optional[RouteFormData]:
                 key="cargo_volume_input"
             )
             
-            hazmat_class = st.text_input(
-                "Hazmat Class",
-                value=st.session_state.form_hazmat_class,
-                placeholder="Optional: Enter hazmat class",
-                help="Leave empty if not hazardous",
-                key="hazmat_class_input"
-            ) if cargo_type == "Hazardous" else ""
+            hazmat_class = ""
+            if cargo_type == "Hazardous Materials":
+                hazmat_class = st.selectbox(
+                    "Hazmat Class",
+                    [
+                        "Class 1 - Explosives",
+                        "Class 2 - Gases",
+                        "Class 3 - Flammable Liquids",
+                        "Class 4 - Flammable Solids",
+                        "Class 5 - Oxidizing Substances",
+                        "Class 6 - Toxic Substances",
+                        "Class 7 - Radioactive Materials",
+                        "Class 8 - Corrosive Substances",
+                        "Class 9 - Miscellaneous"
+                    ],
+                    help="Select the hazard class for dangerous goods",
+                    key="hazmat_class_input"
+                )
             
-            temp_celsius = st.number_input(
-                "Required Temperature (°C)",
-                value=st.session_state.form_temp_celsius,
-                help="Required temperature for temperature-controlled cargo",
-                key="temp_celsius_input"
-            ) if temp_controlled else None
+            temp_celsius = None
+            if temp_controlled:
+                temp_celsius = st.number_input(
+                    "Required Temperature (°C)",
+                    value=st.session_state.form_temp_celsius,
+                    min_value=-30.0,
+                    max_value=30.0,
+                    help="Required temperature between -30°C and 30°C",
+                    key="temp_celsius_input"
+                )
         
         submitted = st.form_submit_button("Calculate Route", type="primary")
         
@@ -219,6 +256,14 @@ def render_route_form() -> Optional[RouteFormData]:
             
             if pickup_datetime >= delivery_datetime:
                 st.error("Delivery time must be after pickup time.")
+                return None
+                
+            if cargo_weight > TransportType(transport_type).max_weight:
+                st.error(f"Cargo weight exceeds maximum capacity of {transport_type} ({TransportType(transport_type).max_weight:,.0f} kg)")
+                return None
+            
+            if temp_controlled and (temp_celsius < -30 or temp_celsius > 30):
+                st.error("Temperature must be between -30°C and 30°C")
                 return None
             
             # Get location details
@@ -233,7 +278,7 @@ def render_route_form() -> Optional[RouteFormData]:
                 weight_kg=cargo_weight,
                 volume_m3=cargo_volume,
                 cargo_type=cargo_type,
-                hazmat_class=hazmat_class if cargo_type == "Hazardous" else None,
+                hazmat_class=hazmat_class if cargo_type == "Hazardous Materials" else None,
                 temperature_controlled=temp_controlled,
                 required_temp_celsius=temp_celsius if temp_controlled else None
             )

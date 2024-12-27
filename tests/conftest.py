@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from src.api.app import app as flask_app
 from src.domain.services import RoutePlanningService
+from src.domain.interfaces.services.route_service import RouteService
 from src.infrastructure.repositories.route_repository import RouteRepository
 from src.infrastructure.services.google_maps_service import GoogleMapsService
 from src.infrastructure.database import Base, Database
@@ -78,9 +79,9 @@ def location_service() -> GoogleMapsService:
     return GoogleMapsService()
 
 @pytest.fixture(scope="module")
-def route_planning_service(location_service) -> RoutePlanningService:
+def route_planning_service(route_repository, location_service) -> RouteService:
     """Create route planning service."""
-    return RoutePlanningService(location_service=location_service)
+    return RoutePlanningService(route_repository=route_repository, location_service=location_service)
 
 @pytest.fixture(scope="module")
 def app_with_mocked_services(app, mock_openai_service):

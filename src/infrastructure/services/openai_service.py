@@ -1,19 +1,23 @@
 """OpenAI service implementation."""
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+from uuid import UUID
 import time
-import httpx
+from datetime import timezone as tz
 
-from openai import OpenAI
-from openai.types.chat import ChatCompletion
-from openai._exceptions import OpenAIError
+import openai
+from openai import OpenAIError
 
-from src.domain.interfaces import AIService, AIServiceError
-from src.domain.value_objects import Location
-from src.domain.entities import Route
-from src.config import get_settings
+from src.domain.entities.route import Route
+from src.domain.interfaces.services.ai_service import AIService, AIServiceError
 from src.infrastructure.logging import get_logger
+from src.settings import get_settings
 
 logger = get_logger()
+
+def utc_now() -> datetime:
+    """Return current UTC datetime."""
+    return datetime.now(tz.utc)
 
 class OpenAIService(AIService):
     """OpenAI API implementation of AIService."""
@@ -32,21 +36,22 @@ class OpenAIService(AIService):
         if not self.api_key:
             raise AIServiceError("OpenAI API key not found in settings or environment")
         
+        # Get model from environment settings
         self.model = settings.OPENAI_MODEL
         self.max_retries = settings.OPENAI_MAX_RETRIES
         self.retry_delay = settings.OPENAI_RETRY_DELAY
         
         try:
             # Initialize with a custom httpx client
-            http_client = httpx.Client(timeout=30.0)
-            self.client = OpenAI(
+            http_client = openai.httpx.Client(timeout=30.0)
+            self.client = openai.OpenAI(
                 api_key=self.api_key,
                 http_client=http_client
             )
         except Exception as e:
             raise AIServiceError(f"Failed to initialize OpenAI client: {str(e)}")
 
-    def _make_request(self, messages: list[Dict[str, str]], **kwargs: Dict[str, Any]) -> ChatCompletion:
+    def _make_request(self, messages: list[Dict[str, str]], **kwargs: Dict[str, Any]) -> openai.ChatCompletion:
         """Make a request to OpenAI API with retry logic.
         
         Args:
@@ -54,7 +59,7 @@ class OpenAIService(AIService):
             **kwargs: Additional arguments for the API call
             
         Returns:
-            ChatCompletion: API response
+            openai.ChatCompletion: API response
             
         Raises:
             AIServiceError: If request fails after retries
@@ -98,7 +103,7 @@ class OpenAIService(AIService):
         except Exception as e:
             raise AIServiceError(f"Unexpected error in response generation: {str(e)}")
 
-    def generate_route_fact(self, origin: Location, destination: Location, context: Optional[Dict] = None) -> str:
+    def generate_route_fact(self, origin: Dict, destination: Dict, context: Optional[Dict] = None) -> str:
         """Generate an interesting fact about a route.
         
         Args:
@@ -113,14 +118,14 @@ class OpenAIService(AIService):
             AIServiceError: If fact generation fails
         """
         prompt = (
-            f"Generate a brief, interesting fact about a route from {origin.address} "
-            f"to {destination.address}"
+            f"Generate a brief, interesting fact about a route from {origin.get('address', origin.get('city', 'Unknown Location'))} "
+            f"to {destination.get('address', destination.get('city', 'Unknown Location'))}"
         )
         if context:
             prompt += f" considering: {context}"
         return self.generate_response(prompt, temperature=0.7, max_tokens=100)
 
-    def enhance_route_description(self, origin: Location, destination: Location, distance_km: float, duration_hours: float, context: Optional[Dict] = None) -> str:
+    def enhance_route_description(self, origin: Dict, destination: Dict, distance_km: float, duration_hours: float, context: Optional[Dict] = None) -> str:
         """Generate an enhanced description of a route with logistics-relevant information.
         
         Args:
@@ -151,7 +156,7 @@ class OpenAIService(AIService):
         )
         
         user_prompt = (
-            f"Analyze the transport route from {origin.address} to {destination.address}.\n"
+            f"Analyze the transport route from {origin.get('address', origin.get('city', 'Unknown Location'))} to {destination.get('address', destination.get('city', 'Unknown Location'))}.\n"
             f"Route metrics:\n"
             f"- Distance: {distance_km:.1f} km\n"
             f"- Duration: {duration_hours:.1f} hours\n"

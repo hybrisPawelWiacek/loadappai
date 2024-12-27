@@ -13,7 +13,7 @@ import logging
 from src.domain.interfaces import AIServiceError
 from src.domain.value_objects import Location
 from src.infrastructure.services.openai_service import OpenAIService
-from src.config import Settings, get_settings
+from src.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 

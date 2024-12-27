@@ -1,7 +1,7 @@
 """Update toll rates to new format.
 
 Revision ID: 002_update_toll_rates
-Revises: 5d4bd7b43d52
+Revises: 004
 Create Date: 2024-12-22 21:42:00.000000
 
 """
@@ -13,7 +13,7 @@ import json
 
 # revision identifiers, used by Alembic.
 revision = '002_update_toll_rates'
-down_revision = '5d4bd7b43d52'
+down_revision = '004'
 branch_labels = None
 depends_on = None
 

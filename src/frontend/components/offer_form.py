@@ -1,16 +1,17 @@
 """
 Offer creation and editing form component for LoadApp.AI
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Any
-import uuid
+from typing import Dict, List, Optional
+from uuid import UUID
 
 import streamlit as st
+from streamlit import session_state as state
 
-from src.domain.entities import Offer
-from src.domain.enums import OfferStatus
-
+from src.domain.entities.offer import Offer
+from src.domain.services import OfferGenerationService
+from src.infrastructure.logging import get_logger
 
 def render_offer_form(
     offer: Optional[Offer] = None,
@@ -191,12 +192,12 @@ def render_offer_form(
             
             # Return form data
             return {
-                "id": str(uuid.uuid4()) if not offer else offer.id,
+                "id": str(UUID()) if not offer else offer.id,
                 "status": status,
                 "base_cost": float(current_base),
                 "margin": margin_percentage,
                 "final_price": float(final_price),
-                "pickup_date": datetime.combine(pickup_date, pickup_time).replace(tzinfo=timezone.utc),
+                "pickup_date": datetime.combine(pickup_date, pickup_time).replace(tzinfo=datetime.timezone.utc),
                 "delivery_date": None,  # To be calculated based on route
                 "fun_fact": fun_fact if include_fun_fact else None,
                 "additional_services": additional_services,

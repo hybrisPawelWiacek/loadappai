@@ -361,3 +361,371 @@ def test_version_conflict(client, offer_id):
     data = response.get_json()
     assert "error" in data
     assert "version" in data["error"]
+
+def test_get_route_settings(client, route_id):
+    """Test get route settings endpoint."""
+    # First request should return default settings
+    response = client.get(f"/api/v1/routes/{route_id}/settings")
+    assert response.status_code == 200
+    
+    data = response.get_json()
+    assert data["route_id"] == route_id
+    assert "settings" in data
+    assert "metadata" in data
+    assert data["metadata"]["version"] == 1
+    
+    # Verify default settings structure
+    settings = data["settings"]
+    assert "enabled_components" in settings
+    assert "fuel_rates" in settings
+    assert "toll_rates" in settings
+    assert "driver_rates" in settings
+    assert "maintenance_rates" in settings
+    assert "overhead_rates" in settings
+
+def test_create_route_settings(client, route_id):
+    """Test create route settings endpoint."""
+    settings_data = {
+        "enabled_components": ["fuel", "toll", "driver"],
+        "fuel_rates": {
+            "DE": {"rate": 1.8, "currency": "EUR"},
+            "FR": {"rate": 1.9, "currency": "EUR"}
+        },
+        "toll_rates": {
+            "DE": {"rate": 0.2, "currency": "EUR"},
+            "FR": {"rate": 0.25, "currency": "EUR"}
+        },
+        "driver_rates": {
+            "DE": {"rate": 250.0, "currency": "EUR"},
+            "FR": {"rate": 280.0, "currency": "EUR"}
+        },
+        "maintenance_rates": {
+            "rate": 0.1,
+            "currency": "EUR"
+        },
+        "overhead_rates": {
+            "rate": 50.0,
+            "currency": "EUR"
+        }
+    }
+    
+    # Create new settings
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json=settings_data
+    )
+    assert response.status_code == 201
+    
+    data = response.get_json()
+    assert data["route_id"] == route_id
+    assert data["settings"]["enabled_components"] == settings_data["enabled_components"]
+    assert data["metadata"]["version"] == 1
+    assert data["metadata"]["created_by"] is None
+    
+    # Try to create settings again (should fail)
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json=settings_data
+    )
+    assert response.status_code == 409  # Conflict
+
+def test_update_route_settings(client, route_id):
+    """Test update route settings endpoint."""
+    # First create settings
+    initial_settings = {
+        "enabled_components": ["fuel", "toll"],
+        "fuel_rates": {
+            "DE": {"rate": 1.8, "currency": "EUR"}
+        },
+        "toll_rates": {
+            "DE": {"rate": 0.2, "currency": "EUR"}
+        }
+    }
+    
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json=initial_settings
+    )
+    assert response.status_code == 201
+    
+    # Update settings
+    updated_settings = {
+        "enabled_components": ["fuel", "toll", "driver"],
+        "fuel_rates": {
+            "DE": {"rate": 2.0, "currency": "EUR"}
+        },
+        "toll_rates": {
+            "DE": {"rate": 0.25, "currency": "EUR"}
+        },
+        "driver_rates": {
+            "DE": {"rate": 250.0, "currency": "EUR"}
+        }
+    }
+    
+    response = client.put(
+        f"/api/v1/routes/{route_id}/settings",
+        json=updated_settings
+    )
+    assert response.status_code == 200
+    
+    data = response.get_json()
+    assert data["route_id"] == route_id
+    assert len(data["settings"]["enabled_components"]) == 3
+    assert data["metadata"]["version"] == 2
+    
+    # Verify the changes
+    response = client.get(f"/api/v1/routes/{route_id}/settings")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["settings"]["fuel_rates"]["DE"]["rate"] == 2.0
+
+def test_route_settings_validation(client, route_id):
+    """Test validation for route settings endpoints."""
+    # Test missing required fields
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json={"enabled_components": ["fuel"]}  # Missing rates
+    )
+    assert response.status_code == 400
+    
+    # Test invalid component name
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json={
+            "enabled_components": ["invalid_component"],
+            "fuel_rates": {
+                "DE": {"rate": 1.8, "currency": "EUR"}
+            }
+        }
+    )
+    assert response.status_code == 400
+    
+    # Test invalid rate value
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json={
+            "enabled_components": ["fuel"],
+            "fuel_rates": {
+                "DE": {"rate": -1.0, "currency": "EUR"}  # Negative rate
+            }
+        }
+    )
+    assert response.status_code == 400
+    
+    # Test invalid currency
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json={
+            "enabled_components": ["fuel"],
+            "fuel_rates": {
+                "DE": {"rate": 1.8, "currency": "INVALID"}
+            }
+        }
+    )
+    assert response.status_code == 400
+
+def test_route_settings_not_found(client):
+    """Test route settings endpoints with non-existent route."""
+    non_existent_id = "00000000-0000-0000-0000-000000000000"
+    
+    # Test GET
+    response = client.get(f"/api/v1/routes/{non_existent_id}/settings")
+    assert response.status_code == 404
+    
+    # Test POST
+    response = client.post(
+        f"/api/v1/routes/{non_existent_id}/settings",
+        json={
+            "enabled_components": ["fuel"],
+            "fuel_rates": {
+                "DE": {"rate": 1.8, "currency": "EUR"}
+            }
+        }
+    )
+    assert response.status_code == 404
+    
+    # Test PUT
+    response = client.put(
+        f"/api/v1/routes/{non_existent_id}/settings",
+        json={
+            "enabled_components": ["fuel"],
+            "fuel_rates": {
+                "DE": {"rate": 1.8, "currency": "EUR"}
+            }
+        }
+    )
+    assert response.status_code == 404
+
+def test_calculate_route_costs(client, route_id):
+    """Test calculate route costs endpoint."""
+    # Test successful calculation
+    response = client.post(f"/api/v1/routes/{route_id}/calculate")
+    assert response.status_code == 200
+    
+    data = response.get_json()
+    assert "route_id" in data
+    assert data["route_id"] == str(route_id)
+    assert "breakdown" in data
+    assert "components" in data["breakdown"]
+    assert "total" in data["breakdown"]
+    assert "amount" in data["breakdown"]["total"]
+    assert "currency" in data["breakdown"]["total"]
+    assert "metadata" in data
+    assert "version" in data["metadata"]
+    assert "created_at" in data["metadata"]
+
+    # Test non-existent route
+    response = client.post("/api/v1/routes/00000000-0000-0000-0000-000000000000/calculate")
+    assert response.status_code == 404
+    data = response.get_json()
+    assert "error" in data
+    assert "code" in data
+    assert data["code"] == "NOT_FOUND"
+
+def test_get_route_costs(client, route_id):
+    """Test get route costs endpoint."""
+    # First calculate costs
+    response = client.post(f"/api/v1/routes/{route_id}/calculate")
+    assert response.status_code == 200
+
+    # Then get the costs
+    response = client.get(f"/api/v1/routes/{route_id}/costs")
+    assert response.status_code == 200
+    
+    data = response.get_json()
+    assert "route_id" in data
+    assert data["route_id"] == str(route_id)
+    assert "breakdown" in data
+    assert "components" in data["breakdown"]
+    assert "total" in data["breakdown"]
+    assert "amount" in data["breakdown"]["total"]
+    assert "currency" in data["breakdown"]["total"]
+    assert "metadata" in data
+    assert "version" in data["metadata"]
+    assert "created_at" in data["metadata"]
+
+    # Test non-existent route
+    response = client.get("/api/v1/routes/00000000-0000-0000-0000-000000000000/costs")
+    assert response.status_code == 404
+    data = response.get_json()
+    assert "error" in data
+    assert "code" in data
+    assert data["code"] == "NOT_FOUND"
+
+    # Test route with no costs calculated
+    # First create a new route
+    route_data = {
+        "origin": {
+            "address": "Paris, France",
+            "latitude": 48.8566,
+            "longitude": 2.3522
+        },
+        "destination": {
+            "address": "Frankfurt, Germany",
+            "latitude": 50.1109,
+            "longitude": 8.6821
+        },
+        "pickup_time": (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z",
+        "delivery_time": (datetime.utcnow() + timedelta(days=2)).isoformat() + "Z",
+        "transport_type": "flatbed_truck",
+        "cargo_id": "cargo_001"
+    }
+    response = client.post("/api/v1/routes", json=route_data)
+    assert response.status_code == 201
+    new_route_id = response.get_json()["id"]
+
+    # Then try to get costs without calculating first
+    response = client.get(f"/api/v1/routes/{new_route_id}/costs")
+    assert response.status_code == 404
+    data = response.get_json()
+    assert "error" in data
+    assert "code" in data
+    assert data["code"] == "NOT_FOUND"
+
+def test_route_settings_endpoints(client, route_id):
+    """Test route settings endpoints."""
+    # Test GET without settings
+    response = client.get(f"/api/v1/routes/{route_id}/settings")
+    assert response.status_code == 404
+    assert response.get_json()["code"] == "NOT_FOUND"
+
+    # Test POST to create settings
+    settings_data = {
+        "fuel_rates": {
+            "DE": "1.50",
+            "FR": "1.60"
+        },
+        "toll_rates": {
+            "DE": {
+                "flatbed_truck": "0.20"
+            },
+            "FR": {
+                "flatbed_truck": "0.25"
+            }
+        },
+        "driver_rates": {
+            "DE": "30.00",
+            "FR": "35.00"
+        },
+        "overhead_rates": {
+            "DE": "100.00",
+            "FR": "120.00"
+        },
+        "maintenance_rates": {
+            "flatbed_truck": "0.15"
+        },
+        "enabled_components": ["fuel", "toll", "driver"]
+    }
+    
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json=settings_data
+    )
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data["route_id"] == str(route_id)
+    assert "settings" in data
+    assert "metadata" in data
+    assert data["settings"]["fuel_rates"] == settings_data["fuel_rates"]
+    assert data["settings"]["toll_rates"] == settings_data["toll_rates"]
+    assert set(data["settings"]["enabled_components"]) == set(settings_data["enabled_components"])
+
+    # Test GET with settings
+    response = client.get(f"/api/v1/routes/{route_id}/settings")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["route_id"] == str(route_id)
+    assert data["settings"]["fuel_rates"] == settings_data["fuel_rates"]
+    assert data["settings"]["toll_rates"] == settings_data["toll_rates"]
+    assert set(data["settings"]["enabled_components"]) == set(settings_data["enabled_components"])
+
+    # Test PUT to update settings
+    updated_settings = settings_data.copy()
+    updated_settings["fuel_rates"]["DE"] = "1.55"
+    updated_settings["enabled_components"].append("maintenance")
+    
+    response = client.put(
+        f"/api/v1/routes/{route_id}/settings",
+        json=updated_settings
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["settings"]["fuel_rates"]["DE"] == "1.55"
+    assert "maintenance" in data["settings"]["enabled_components"]
+
+    # Test non-existent route
+    response = client.get("/api/v1/routes/00000000-0000-0000-0000-000000000000/settings")
+    assert response.status_code == 404
+    assert response.get_json()["code"] == "NOT_FOUND"
+
+    # Test invalid data
+    invalid_settings = {
+        "fuel_rates": "invalid",  # Should be a dict
+        "enabled_components": "invalid"  # Should be a list
+    }
+    response = client.post(
+        f"/api/v1/routes/{route_id}/settings",
+        json=invalid_settings
+    )
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "BAD_REQUEST"

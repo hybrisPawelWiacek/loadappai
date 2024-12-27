@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.infrastructure.config import Settings
+from src.settings import Settings
 from src.infrastructure.database import Base
 
 
@@ -16,20 +16,21 @@ from src.infrastructure.database import Base
 def test_settings():
     """Create test settings."""
     test_settings = Settings(
+        ENV="testing",  
         DATABASE_URL="sqlite:///:memory:",
         SQL_ECHO=False,
         GOOGLE_MAPS_API_KEY="test_google_maps_key",
         OPENAI_API_KEY="test_openai_key",
-        WEATHER_ENABLED=False,
-        TRAFFIC_ENABLED=False,
-        MARKET_DATA_ENABLED=False,
-        BACKEND_HOST="localhost",
-        BACKEND_PORT=5000,
-        DEFAULT_FUEL_PRICE=1.50,
-        DEFAULT_DRIVER_SALARY=138.0,
-        DEFAULT_TOLL_RATES={"DE": 0.10, "FR": 0.12},
+        FLASK_PORT=5001,  
+        STREAMLIT_PORT=8501,
+        FLASK_ENV="testing",
+        DEBUG=True,
+        ENABLE_OPENAI=False,
+        ENABLE_GOOGLE_MAPS=False,
+        DEFAULT_CURRENCY="EUR",
+        DEFAULT_COUNTRY="DE",
     )
-    with patch("src.infrastructure.config.settings", test_settings):
+    with patch("src.settings.get_settings", return_value=test_settings):
         yield test_settings
 
 

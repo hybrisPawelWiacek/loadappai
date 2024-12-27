@@ -1,7 +1,7 @@
 """API client for LoadApp.AI backend."""
 import uuid
 import requests
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -9,6 +9,10 @@ from enum import Enum
 from decimal import Decimal
 import structlog
 from http import HTTPStatus
+
+from src.frontend.components.route_form import RouteFormData, Location
+from src.frontend.components.map_visualization import RouteSegment, TimelineEventType
+from src.frontend.components.cost_calculation import EnhancedCostBreakdown
 
 # Configure logging
 logger = structlog.get_logger(__name__)
@@ -128,13 +132,22 @@ class APIClient:
         return self._make_request('POST', '/api/v1/routes', json_data=route_data)
         
     def get_route(self, route_id: str) -> Dict:
-        """Get route by ID.
+        """Get route details by ID.
         
         Args:
-            route_id: Route ID
+            route_id: ID of the route to fetch
             
         Returns:
-            Route data
+            Route data containing:
+                - id: str
+                - origin: Dict[str, Any]
+                - destination: Dict[str, Any]
+                - distance_km: float
+                - duration_hours: float
+                - segments: List[Dict]
+                - metadata: Dict
+                - created_at: str
+                - modified_at: str
         """
         return self._make_request('GET', f'/api/v1/routes/{route_id}')
         
@@ -147,10 +160,10 @@ class APIClient:
         Returns:
             Cost calculation data
         """
-        return self._make_request('GET', f'/api/v1/routes/{route_id}/costs')
+        return self._make_request('POST', f'/api/v1/routes/{route_id}/costs')
         
     def create_offer(self, offer_data: Dict) -> Dict:
-        """Create a new offer.
+        """Create a new offer with AI-enhanced content.
         
         Args:
             offer_data: Dictionary containing:
@@ -175,7 +188,28 @@ class APIClient:
                 - created_at: str
                 - modified_at: str
         """
-        return self._make_request('POST', '/api/v1/offers', json_data=offer_data)
+        try:
+            # Get route data for AI content generation
+            route_data = self.get_route(offer_data['route_id'])
+            
+            # Generate fun fact using OpenAI service
+            fun_fact = self._make_request(
+                'POST', 
+                '/api/v1/ai/generate-fun-fact',
+                json_data={'route': route_data}
+            ).get('fun_fact')
+            
+            # Add fun fact to offer data
+            if fun_fact:
+                offer_data['fun_fact'] = fun_fact
+                
+            # Create the offer
+            return self._make_request('POST', '/api/v1/offers', json_data=offer_data)
+            
+        except Exception as e:
+            logger.error("Failed to create offer with AI content", error=str(e))
+            # Fallback to creating offer without AI content
+            return self._make_request('POST', '/api/v1/offers', json_data=offer_data)
         
     def get_offer(self, offer_id: str) -> Dict:
         """Get offer by ID.
@@ -421,3 +455,195 @@ class APIClient:
             '/api/settings/costs/validate',
             json_data=settings
         )
+
+    def get_route_cost(self, route_id: str) -> Optional[EnhancedCostBreakdown]:
+        """Get cost calculation for a route.
+        
+        Args:
+            route_id: Route ID
+            
+        Returns:
+            Cost calculation data as EnhancedCostBreakdown object, or None if calculation fails
+        """
+        try:
+            cost_data = self._make_request('POST', f'/api/v1/routes/{route_id}/costs')
+            if not cost_data:
+                self.logger.warning("No cost data received from API", route_id=route_id)
+                return None
+                
+            # Convert all numeric values to Decimal
+            for country, costs in cost_data.get('fuel_costs', {}).items():
+                cost_data['fuel_costs'][country] = Decimal(str(costs))
+            for country, costs in cost_data.get('toll_costs', {}).items():
+                cost_data['toll_costs'][country] = Decimal(str(costs))
+            for country, costs in cost_data.get('driver_costs', {}).items():
+                cost_data['driver_costs'][country] = Decimal(str(costs))
+                
+            cost_data['rest_period_costs'] = Decimal(str(cost_data.get('rest_period_costs', 0)))
+            cost_data['loading_unloading_costs'] = Decimal(str(cost_data.get('loading_unloading_costs', 0)))
+            
+            # Convert empty driving costs
+            empty_driving_costs = {}
+            for country, costs in cost_data.get('empty_driving_costs', {}).items():
+                empty_driving_costs[country] = {
+                    k: Decimal(str(v)) for k, v in costs.items()
+                }
+            cost_data['empty_driving_costs'] = empty_driving_costs
+            
+            # Convert cargo specific costs
+            cost_data['cargo_specific_costs'] = {
+                k: Decimal(str(v)) for k, v in cost_data.get('cargo_specific_costs', {}).items()
+            }
+            
+            # Convert overhead costs
+            cost_data['overheads'] = {
+                k: Decimal(str(v)) for k, v in cost_data.get('overheads', {}).items()
+            }
+            
+            return EnhancedCostBreakdown(**cost_data)
+            
+        except Exception as e:
+            self.logger.error("Error getting route cost", route_id=route_id, error=str(e))
+            return None
+
+    def submit_route(self, form_data: 'RouteFormData') -> Tuple[List['RouteSegment'], datetime, str]:
+        """Submit route data to backend API and convert response to frontend models.
+        
+        Args:
+            form_data: Route form data containing origin, destination, and transport details
+            
+        Returns:
+            Tuple containing:
+                - List of route segments
+                - Pickup time
+                - Route ID
+                
+        Raises:
+            APIError: If the request fails
+        """
+        # Prepare request data with cargo specs from form data
+        cargo_specs = {
+            "weight_kg": form_data.cargo_specs.weight_kg if form_data.cargo_specs else 0,
+            "volume_m3": form_data.cargo_specs.volume_m3 if form_data.cargo_specs else 0,
+            "cargo_type": form_data.cargo_specs.cargo_type if form_data.cargo_specs else "General",
+            "temperature_controlled": form_data.cargo_specs.temperature_controlled if form_data.cargo_specs else False,
+            "required_temp_celsius": form_data.cargo_specs.required_temp_celsius if form_data.cargo_specs else None,
+            "hazmat_class": form_data.cargo_specs.hazmat_class if form_data.cargo_specs else None
+        }
+        
+        request_data = {
+            "origin": {
+                "address": form_data.origin.address,
+                "latitude": form_data.origin.latitude,
+                "longitude": form_data.origin.longitude,
+                "country": form_data.origin.country
+            },
+            "destination": {
+                "address": form_data.destination.address,
+                "latitude": form_data.destination.latitude,
+                "longitude": form_data.destination.longitude,
+                "country": form_data.destination.country
+            },
+            "transport_type": form_data.transport_type,
+            "pickup_time": form_data.pickup_time.isoformat(),
+            "delivery_time": form_data.delivery_time.isoformat(),
+            "cargo_specs": cargo_specs
+        }
+
+        # Send request to backend
+        route_data = self._make_request('POST', '/api/v1/routes', json_data=request_data)
+        route_id = route_data.get("id")
+        segments = []
+        
+        # Create timeline segments
+        # 1. Loading at origin
+        loading_segment = RouteSegment(
+            start_location=Location(
+                address=route_data["origin"]["address"],
+                latitude=route_data["origin"]["latitude"],
+                longitude=route_data["origin"]["longitude"],
+                country=route_data["origin"]["country"]
+            ),
+            end_location=Location(
+                address=route_data["origin"]["address"],
+                latitude=route_data["origin"]["latitude"],
+                longitude=route_data["origin"]["longitude"],
+                country=route_data["origin"]["country"]
+            ),
+            distance_km=0,
+            duration_hours=0.5,  # 30 minutes for loading
+            country=route_data["origin"]["country"],
+            is_empty_driving=False,
+            timeline_event=TimelineEventType.PICKUP
+        )
+        segments.append(loading_segment)
+        
+        # 2. Main transport segment
+        main_segment = RouteSegment(
+            start_location=Location(
+                address=route_data["origin"]["address"],
+                latitude=route_data["origin"]["latitude"],
+                longitude=route_data["origin"]["longitude"],
+                country=route_data["origin"]["country"]
+            ),
+            end_location=Location(
+                address=route_data["destination"]["address"],
+                latitude=route_data["destination"]["latitude"],
+                longitude=route_data["destination"]["longitude"],
+                country=route_data["destination"]["country"]
+            ),
+            distance_km=route_data["distance_km"],
+            duration_hours=route_data["duration_hours"],
+            country=route_data["origin"]["country"],
+            is_empty_driving=False,
+            timeline_event=TimelineEventType.LOADED_DRIVING
+        )
+        segments.append(main_segment)
+        
+        # 3. Unloading at destination
+        unloading_segment = RouteSegment(
+            start_location=Location(
+                address=route_data["destination"]["address"],
+                latitude=route_data["destination"]["latitude"],
+                longitude=route_data["destination"]["longitude"],
+                country=route_data["destination"]["country"]
+            ),
+            end_location=Location(
+                address=route_data["destination"]["address"],
+                latitude=route_data["destination"]["latitude"],
+                longitude=route_data["destination"]["longitude"],
+                country=route_data["destination"]["country"]
+            ),
+            distance_km=0,
+            duration_hours=0.5,  # 30 minutes for unloading
+            country=route_data["destination"]["country"],
+            is_empty_driving=False,
+            timeline_event=TimelineEventType.DELIVERY
+        )
+        segments.append(unloading_segment)
+        
+        # Add empty driving segment if present
+        if route_data.get("empty_driving") and route_data["empty_driving"].get("start_location"):
+            empty = route_data["empty_driving"]
+            empty_segment = RouteSegment(
+                start_location=Location(
+                    address=empty["start_location"]["address"],
+                    latitude=empty["start_location"]["latitude"],
+                    longitude=empty["start_location"]["longitude"],
+                    country=empty["start_location"]["country"]
+                ),
+                end_location=Location(
+                    address=empty["end_location"]["address"],
+                    latitude=empty["end_location"]["latitude"],
+                    longitude=empty["end_location"]["longitude"],
+                    country=empty["end_location"]["country"]
+                ),
+                distance_km=empty["distance_km"],
+                duration_hours=empty["duration_hours"],
+                country=empty["start_location"]["country"],
+                is_empty_driving=True,
+                timeline_event=TimelineEventType.EMPTY_DRIVING
+            )
+            segments.append(empty_segment)
+        
+        return segments, form_data.pickup_time, route_id

@@ -86,13 +86,19 @@ class EnhancedCostBreakdown:
         return sum(components, Decimal("0"))
 
 
-def display_enhanced_cost_breakdown(cost_data: EnhancedCostBreakdown):
+def display_enhanced_cost_breakdown(cost_data: Optional[EnhancedCostBreakdown]):
     """Display a detailed breakdown of transportation costs.
     
     Args:
         cost_data: Cost breakdown data from the API
     """
     cost_logger = logger.bind(component="cost_breakdown")
+    
+    if cost_data is None:
+        cost_logger.warning("No cost data available")
+        st.warning("Cost calculation in progress...")
+        return
+        
     cost_logger.info("Displaying cost breakdown",
                 total_cost=str(cost_data.total_cost),
                 has_fuel_costs=bool(cost_data.fuel_costs),

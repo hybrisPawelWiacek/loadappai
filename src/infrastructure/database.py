@@ -1,22 +1,24 @@
-"""Database configuration and session management."""
-import os
+"""Database module."""
 from contextlib import contextmanager
 from typing import Generator, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
-# Get database URL from environment variable or use default SQLite URL
-SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL", "sqlite:///./loadapp.db"
-)
+from src.settings import get_settings
 
+settings = get_settings()
+
+# Get database URL from settings
+SQLALCHEMY_DATABASE_URL = settings.database.url
+
+# Configure SQLAlchemy engine
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},  # Needed for SQLite
-    pool_pre_ping=True,  # Enable connection health checks
+    echo=settings.database.echo,
 )
 
 SessionLocal = sessionmaker(
@@ -51,7 +53,6 @@ class Database:
         return self.engine
 
 
-@contextmanager
 def get_db() -> Generator[Session, None, None]:
     """Get database session."""
     db = SessionLocal()
@@ -63,16 +64,19 @@ def get_db() -> Generator[Session, None, None]:
 
 @contextmanager
 def transaction_context() -> Generator[Session, None, None]:
-    """Context manager for database transactions."""
-    db = SessionLocal()
+    """Context manager for database transactions.
+    
+    Automatically rolls back transaction on error and closes session.
+    """
+    session = SessionLocal()
     try:
-        yield db
-        db.commit()
+        yield session
+        session.commit()
     except Exception:
-        db.rollback()
+        session.rollback()
         raise
     finally:
-        db.close()
+        session.close()
 
 
 def init_db() -> None:
@@ -81,6 +85,9 @@ def init_db() -> None:
 
 
 def clear_db() -> None:
-    """Clear all data from database."""
+    """Clear all data from database.
+    
+    Warning: This will delete all data! Use only in tests.
+    """
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

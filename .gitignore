@@ -1,5 +1,11 @@
 # Database
 loadapp.db
+instance/*
+!instance/.gitkeep
+migrations/*
+!migrations/*.py
+!migrations/README
+!migrations/versions/*.py
 
 # macOS
 .DS_Store

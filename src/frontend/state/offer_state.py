@@ -1,17 +1,20 @@
-"""
-State management for offer-related functionality.
-"""
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+"""Offer state management."""
+from datetime import datetime
 from decimal import Decimal
-from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
+from uuid import UUID
 
+from pydantic import BaseModel, Field
+
+from src.domain.entities.offer import Offer, OfferHistory
+from src.domain.entities.route import Route
+from src.domain.services import OfferGenerationService
+from src.infrastructure.logging import get_logger
+
+from dataclasses import dataclass, field
+from enum import Enum
 import streamlit as st
 import requests
-
-from src.domain.entities import Offer, OfferHistory
-from src.domain.enums import OfferStatus
 
 
 class OfferStateError(Exception):

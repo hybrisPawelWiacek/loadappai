@@ -10,7 +10,7 @@ from folium import plugins
 import requests
 from streamlit_folium import st_folium
 from datetime import datetime, timedelta
-from src.config import get_settings
+from src.settings import get_settings
 
 settings = get_settings()
 GOOGLE_MAPS_API_KEY = settings.GOOGLE_MAPS_API_KEY
@@ -98,25 +98,35 @@ def create_route_map(segments: List[RouteSegment], key: str) -> None:
         center_lat = sum(all_lats) / len(all_lats)
         center_lon = sum(all_lons) / len(all_lons)
         
-        # Create map with Google Maps tiles
+        # Create base map with no tiles
         m = folium.Map(
             location=[center_lat, center_lon],
             zoom_start=6,
-            tiles=f'https://mt1.google.com/vt/lyrs=m&x={{x}}&y={{y}}&z={{z}}&key={GOOGLE_MAPS_API_KEY}',
-            attr='Google Maps'
+            tiles=None
         )
         
-        # Add additional Google Maps layers
-        folium.TileLayer(
-            f'https://mt1.google.com/vt/lyrs=s&x={{x}}&y={{y}}&z={{z}}&key={GOOGLE_MAPS_API_KEY}',
-            name='Google Satellite',
-            attr='Google Maps'
+        # Add Google Maps layers
+        google_maps = folium.TileLayer(
+            f'https://mt1.google.com/vt/lyrs=m&x={{x}}&y={{y}}&z={{z}}&key={GOOGLE_MAPS_API_KEY}',
+            name='Google Maps',
+            attr='Google Maps',
+            control=True
         ).add_to(m)
         
-        folium.TileLayer(
+        google_satellite = folium.TileLayer(
+            f'https://mt1.google.com/vt/lyrs=s&x={{x}}&y={{y}}&z={{z}}&key={GOOGLE_MAPS_API_KEY}',
+            name='Google Satellite',
+            attr='Google Maps',
+            control=True,
+            show=False
+        ).add_to(m)
+        
+        google_terrain = folium.TileLayer(
             f'https://mt1.google.com/vt/lyrs=p&x={{x}}&y={{y}}&z={{z}}&key={GOOGLE_MAPS_API_KEY}',
             name='Google Terrain',
-            attr='Google Maps'
+            attr='Google Maps',
+            control=True,
+            show=False
         ).add_to(m)
         
         # Add route segments with different colors
@@ -174,15 +184,15 @@ def create_route_map(segments: List[RouteSegment], key: str) -> None:
         ).add_to(m)
         
         # Add layer control and fullscreen option
-        folium.LayerControl().add_to(m)
+        folium.LayerControl(collapsed=False).add_to(m)
         plugins.Fullscreen().add_to(m)
         
         # Fit map bounds to show all markers
         bounds = [[min(all_lats), min(all_lons)], [max(all_lats), max(all_lons)]]
-        m.fit_bounds(bounds)
+        m.fit_bounds(bounds, padding=(30, 30))
         
-        # Display the map with increased height for better visibility
-        st_folium(m, key=key, width=800, height=600)
+        # Display the map
+        st_folium(m, key=key, height=400, width=None)
         
     except Exception as e:
         st.error(f"Error creating map: {str(e)}")

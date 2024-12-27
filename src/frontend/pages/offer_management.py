@@ -1,29 +1,20 @@
 """
-Offer management page for LoadApp.AI
+Offer management page.
 """
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Dict, List, Optional, Any
-import uuid
+from datetime import datetime
+from typing import Dict, List, Optional
+from uuid import UUID
 
 import streamlit as st
+from streamlit import session_state as state
 
-from src.domain.entities import Offer, OfferHistory
-from src.domain.enums import OfferStatus
-from src.frontend.components.offer_form import render_offer_form
-from src.frontend.components.offer_history import (
-    display_version_history,
-    compare_versions,
-    render_version_selector
-)
-from src.frontend.state.hooks import (
-    use_offer_list,
-    use_offer_details,
-    use_offer_form,
-    use_offer_history
-)
-from src.frontend.state.offer_state import OfferFilters
-
+from src.domain.entities.offer import Offer, OfferHistory
+from src.domain.entities.route import Route
+from src.domain.services import OfferGenerationService
+from src.frontend.components.offer_form import OfferForm
+from src.frontend.components.offer_history import OfferHistoryView
+from src.frontend.state.offer_state import OfferState
+from src.infrastructure.logging import get_logger
 
 def render_offer_list() -> None:
     """Render list of offers with filtering and pagination."""
@@ -45,7 +36,7 @@ def render_offer_list() -> None:
         with col2:
             date_range = st.date_input(
                 "Date Range",
-                value=(datetime.now(timezone.utc).date(), datetime.now(timezone.utc).date()),
+                value=(datetime.now().date(), datetime.now().date()),
                 help="Filter by creation date"
             )
         
@@ -63,8 +54,8 @@ def render_offer_list() -> None:
         if st.button("Apply Filters"):
             filters = OfferFilters(
                 status=status_filter if status_filter else None,
-                created_after=datetime.combine(date_range[0], datetime.min.time()).replace(tzinfo=timezone.utc),
-                created_before=datetime.combine(date_range[1], datetime.max.time()).replace(tzinfo=timezone.utc),
+                created_after=datetime.combine(date_range[0], datetime.min.time()),
+                created_before=datetime.combine(date_range[1], datetime.max.time()),
                 min_price=float(price_range[0]),
                 max_price=float(price_range[1])
             )

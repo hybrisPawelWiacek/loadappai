@@ -1,0 +1,1 @@
+"""Offers blueprint package."""

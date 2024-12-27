@@ -1,18 +1,18 @@
 """Google Maps service implementation."""
-import os
+from datetime import datetime
+from decimal import Decimal
+from typing import Dict, List, Optional, Any, Callable
+from uuid import UUID
 import time
 from functools import lru_cache
-from typing import List, Optional, Tuple, Dict, Any
-from decimal import Decimal
 
 import googlemaps
-from googlemaps.exceptions import ApiError, Timeout, TransportError
+from googlemaps.exceptions import ApiError, TransportError
 
-from src.domain.interfaces import LocationService, LocationServiceError
 from src.domain.value_objects import Location, CountrySegment
-from src.infrastructure.services.toll_rate_service import DefaultTollRateService
-from src.config import get_settings
-from structlog import get_logger
+from src.domain.interfaces.services.location_service import LocationService, LocationServiceError
+from src.infrastructure.logging import get_logger
+from src.settings import get_settings
 
 logger = get_logger()
 
@@ -190,50 +190,99 @@ class GoogleMapsService(LocationService):
             destination=destination.dict()
         )
         
-        # For Poland to Germany route, split distance roughly:
-        # Poland: 60% of total distance
-        # Germany: 40% of total distance
-        total_distance = Decimal("571.725")  # Example total distance
-        total_duration = Decimal("5.89")  # Example total duration
-        
-        # Calculate segment distances and durations
-        pl_distance = total_distance * Decimal("0.6")  # 60% in Poland
-        de_distance = total_distance * Decimal("0.4")  # 40% in Germany
-        pl_duration = total_duration * Decimal("0.6")  # 60% of time in Poland
-        de_duration = total_duration * Decimal("0.4")  # 40% of time in Germany
-        
-        # Get toll rates for both countries
-        pl_toll_rates = self.get_toll_rates("PL", "truck")
-        de_toll_rates = self.get_toll_rates("DE", "truck")
-        
-        logger.info("Creating country segments", 
-                   pl_distance=float(pl_distance),
-                   de_distance=float(de_distance),
-                   pl_duration=float(pl_duration),
-                   de_duration=float(de_duration))
-        
-        # Create segments
-        segments = []
-        
-        # Add Poland segment
-        poland_segment = CountrySegment(
-            country_code="PL",
-            distance=pl_distance,
-            duration_hours=pl_duration,
-            toll_rates=pl_toll_rates
-        )
-        segments.append(poland_segment)
-        
-        # Add Germany segment
-        germany_segment = CountrySegment(
-            country_code="DE",
-            distance=de_distance,
-            duration_hours=de_duration,
-            toll_rates=de_toll_rates
-        )
-        segments.append(germany_segment)
-        
-        return segments
+        try:
+            # Get route data from Google Maps
+            route_data = self._get_route_data(origin, destination)
+            if not route_data:
+                raise LocationServiceError("No route found")
+            
+            # Get total distance and duration
+            total_distance = Decimal(str(self.calculate_distance(origin, destination)))
+            total_duration = Decimal(str(self.calculate_duration(origin, destination)))
+            
+            # Get country codes for origin and destination
+            origin_country = self._get_country_code(origin)
+            dest_country = self._get_country_code(destination)
+            
+            if not origin_country or not dest_country:
+                raise LocationServiceError("Could not determine country codes")
+            
+            # If same country, return single segment
+            if origin_country == dest_country:
+                toll_rates = self.get_toll_rates(origin_country, "truck")
+                return [CountrySegment(
+                    country_code=origin_country,
+                    distance=total_distance,
+                    duration_hours=total_duration,
+                    toll_rates=toll_rates
+                )]
+            
+            # For different countries, analyze route steps to determine country transition
+            steps = route_data[0]['legs'][0]['steps']
+            transition_point = None
+            
+            # Find the step where we cross the border
+            for i, step in enumerate(steps):
+                step_location = Location(
+                    latitude=step['end_location']['lat'],
+                    longitude=step['end_location']['lng'],
+                    address=""  # We don't need the address for this check
+                )
+                country_code = self._get_country_code(step_location)
+                if country_code and country_code != origin_country:
+                    transition_point = i
+                    break
+            
+            if transition_point is None:
+                # If we can't find the exact transition, split 60/40 based on typical routes
+                if origin_country == "PL" and dest_country == "DE":
+                    origin_ratio = Decimal("0.6")
+                elif origin_country == "DE" and dest_country == "PL":
+                    origin_ratio = Decimal("0.4")
+                else:
+                    origin_ratio = Decimal("0.5")
+            else:
+                # Calculate the ratio based on the transition point
+                distance_to_transition = sum(step['distance']['value'] for step in steps[:transition_point])
+                origin_ratio = Decimal(str(distance_to_transition)) / Decimal(str(sum(step['distance']['value'] for step in steps)))
+            
+            # Calculate segment distances and durations
+            origin_distance = total_distance * origin_ratio
+            dest_distance = total_distance * (1 - origin_ratio)
+            origin_duration = total_duration * origin_ratio
+            dest_duration = total_duration * (1 - origin_ratio)
+            
+            # Get toll rates
+            origin_toll_rates = self.get_toll_rates(origin_country, "truck")
+            dest_toll_rates = self.get_toll_rates(dest_country, "truck")
+            
+            logger.info("Creating country segments", 
+                       origin_distance=float(origin_distance),
+                       dest_distance=float(dest_distance),
+                       origin_duration=float(origin_duration),
+                       dest_duration=float(dest_duration))
+            
+            # Create segments
+            segments = [
+                CountrySegment(
+                    country_code=origin_country,
+                    distance=origin_distance,
+                    duration_hours=origin_duration,
+                    toll_rates=origin_toll_rates
+                ),
+                CountrySegment(
+                    country_code=dest_country,
+                    distance=dest_distance,
+                    duration_hours=dest_duration,
+                    toll_rates=dest_toll_rates
+                )
+            ]
+            
+            return segments
+            
+        except Exception as e:
+            logger.error("Error getting country segments", error=str(e))
+            raise LocationServiceError(f"Failed to get country segments: {str(e)}")
 
     def _get_country_code(self, location: Location) -> Optional[str]:
         """Get country code for a location."""

@@ -1,11 +1,14 @@
 """
 State management hooks for frontend components.
 """
+from datetime import datetime
+from decimal import Decimal
 from typing import Tuple, Optional, Dict, Any
+from uuid import UUID
 
 import streamlit as st
 
-from src.domain.entities import Offer, OfferHistory
+from src.domain.entities.offer import Offer, OfferHistory
 from src.frontend.state.offer_state import OfferState, OfferFilters
 
 

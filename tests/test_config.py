@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from src.config import Settings, get_settings
+from src.settings import Settings, get_settings
 
 
 def test_settings_defaults():

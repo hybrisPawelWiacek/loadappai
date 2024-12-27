@@ -8,7 +8,7 @@ import os
 from src.domain.interfaces import LocationServiceError
 from src.domain.value_objects import Location, CountrySegment
 from src.infrastructure.services.google_maps_service import GoogleMapsService
-from src.config import Settings, get_settings
+from src.settings import Settings, get_settings
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +50,9 @@ def test_locations():
 
 def test_init_with_api_key(mock_settings):
     """Test initialization with explicit API key."""
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService(api_key='AIzaTest123')
         assert service.api_key == 'AIzaTest123'
@@ -62,9 +62,9 @@ def test_init_with_api_key(mock_settings):
 
 def test_init_with_settings(mock_settings):
     """Test initialization with settings."""
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService()
         assert service.api_key == mock_settings.GOOGLE_MAPS_API_KEY
@@ -75,9 +75,9 @@ def test_init_with_settings(mock_settings):
 def test_init_without_api_key(mock_settings):
     """Test initialization fails without API key."""
     mock_settings.GOOGLE_MAPS_API_KEY = None
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         with pytest.raises(LocationServiceError, match="Google Maps API key not found"):
             GoogleMapsService()
@@ -106,9 +106,9 @@ def test_get_country_segments_success(mock_settings, mock_gmaps_client, test_loc
         [{'address_components': [{'types': ['country'], 'short_name': 'PL'}]}]
     ]
 
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService()
         segments = service.get_country_segments(origin, dest, transport_type="truck")
@@ -128,9 +128,9 @@ def test_get_country_segments_no_route(mock_settings, mock_gmaps_client, test_lo
     origin, dest = test_locations
     mock_gmaps_client.directions.return_value = None
 
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService()
         with pytest.raises(LocationServiceError, match="No route found"):
@@ -142,9 +142,9 @@ def test_get_country_segments_api_error(mock_settings, mock_gmaps_client, test_l
     origin, dest = test_locations
     mock_gmaps_client.directions.side_effect = googlemaps.exceptions.ApiError("API Error")
 
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService()
         with pytest.raises(LocationServiceError, match="Google Maps API error after 3 retries"):
@@ -166,9 +166,9 @@ def test_get_country_segments_geocode_error(mock_settings, mock_gmaps_client, te
     }]
     mock_gmaps_client.reverse_geocode.return_value = []
 
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService()
         segments = service.get_country_segments(origin, dest, transport_type="truck")
@@ -181,9 +181,9 @@ def test_get_country_segments_invalid_response(mock_settings, mock_gmaps_client,
     origin, dest = test_locations
     mock_gmaps_client.directions.return_value = [{'invalid': 'response'}]
 
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService()
         segments = service.get_country_segments(origin, dest, transport_type="truck")
@@ -199,9 +199,9 @@ def test_get_country_segments_empty_steps(mock_settings, mock_gmaps_client, test
         }]
     }]
 
-    with patch('src.config.get_settings', return_value=mock_settings), \
+    with patch('src.settings.get_settings', return_value=mock_settings), \
          patch.dict('os.environ', {'GOOGLE_MAPS_API_KEY': ''}, clear=True), \
-         patch('src.config.Settings') as mock_settings_class:
+         patch('src.settings.Settings') as mock_settings_class:
         mock_settings_class.return_value = mock_settings
         service = GoogleMapsService()
         segments = service.get_country_segments(origin, dest, transport_type="truck")

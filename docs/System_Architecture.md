@@ -7,7 +7,7 @@ This document outlines the system architecture for the LoadApp.AI Proof of Conce
 - **Presentation Layer (Frontend/UI)**: Streamlit-based web interface for user interactions
 - **Service Layer (Backend)**: Flask RESTful API for route planning, cost calculations, and offer generation
 - **Data Layer (Persistence)**: SQLite database for data persistence
-- **Integration Layer**: External service integrations (future expansion)
+- **Integration Layer**: External service integrations
 
 ## Architectural Principles
 

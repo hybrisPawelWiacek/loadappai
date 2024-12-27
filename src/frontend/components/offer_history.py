@@ -3,15 +3,19 @@ Offer history and version management component for LoadApp.AI
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
+from uuid import UUID
 
 import streamlit as st
+from streamlit import session_state as state
 
-from src.domain.entities import OfferHistory as OfferHistoryEntity
+from src.domain.entities.offer import OfferHistory
+from src.domain.services import OfferGenerationService
+from src.infrastructure.logging import get_logger
 
 
 def display_version_history(
-    history_entries: List[OfferHistoryEntity],
+    history_entries: List[OfferHistory],
     total_entries: int,
     page: int = 1,
     per_page: int = 10
@@ -34,7 +38,7 @@ def display_version_history(
     with col1:
         if page > 1:
             if st.button("← Previous"):
-                st.session_state["history_page"] = page - 1
+                state["history_page"] = page - 1
     
     with col2:
         st.write(f"Page {page} of {total_pages}")
@@ -42,7 +46,7 @@ def display_version_history(
     with col3:
         if page < total_pages:
             if st.button("Next →"):
-                st.session_state["history_page"] = page + 1
+                state["history_page"] = page + 1
     
     # Display history entries
     for entry in history_entries:
@@ -80,8 +84,8 @@ def display_version_history(
 
 
 def compare_versions(
-    version1: OfferHistoryEntity,
-    version2: OfferHistoryEntity
+    version1: OfferHistory,
+    version2: OfferHistory
 ) -> None:
     """
     Compare two versions of an offer side by side.
@@ -95,7 +99,7 @@ def compare_versions(
     col1, col2 = st.columns(2)
     
     # Helper function to display version details
-    def display_version(version: OfferHistoryEntity, column):
+    def display_version(version: OfferHistory, column):
         with column:
             st.markdown(f"**Version {version.version}**")
             st.write(f"Status: {version.status}")
@@ -151,7 +155,7 @@ def compare_versions(
 
 def render_version_selector(
     offer_id: str,
-    history_entries: List[OfferHistoryEntity]
+    history_entries: List[OfferHistory]
 ) -> Optional[Tuple[str, str]]:
     """
     Render version selection controls for comparison.

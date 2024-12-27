@@ -1,351 +1,414 @@
 """Offer repository implementation."""
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import List, Optional, Dict, Any, Tuple
 import uuid
+from datetime import datetime, timezone, timedelta
+from decimal import Decimal, getcontext
+from typing import Dict, List, Optional, Tuple, Union
+from uuid import UUID, uuid4
 
-from sqlalchemy import and_, cast, Float, func, desc, or_
+from sqlalchemy import MetaData, or_, desc
 from sqlalchemy.orm import Session
 
-from src.domain.entities import Offer as OfferEntity, OfferHistory as OfferHistoryEntity
+from src.domain.entities.offer import Offer, OfferHistory
+from src.domain.interfaces.exceptions.repository_errors import OfferNotFoundError
+from src.domain.interfaces.repositories.offer_repository import OfferRepository as IOfferRepository
+from src.domain.value_objects.offer import OfferStatus
 from src.infrastructure.models import Offer as OfferModel, OfferHistory as OfferHistoryModel
-from src.infrastructure.repositories.base import Repository
+from src.infrastructure.database import get_db
+from src.infrastructure.logging import get_logger
 
 
-class OfferRepository(Repository[OfferEntity]):
+class OfferRepository(IOfferRepository):
     """Repository for managing offer entities with version tracking and history."""
 
-    def create(self, entity: OfferEntity) -> OfferEntity:
-        """Create a new offer with initial version."""
-        db_offer = OfferModel(
-            id=str(entity.id),
-            route_id=str(entity.route_id),
-            cost_id=str(entity.cost_id),
-            total_cost=float(entity.total_cost),
-            margin=float(entity.margin),
-            final_price=float(entity.final_price),
-            fun_fact=entity.fun_fact,
-            status=entity.status,
-            version=entity.version or "1.0",
-            is_active=entity.is_active,
-            created_at=entity.created_at.astimezone(timezone.utc),
-            modified_at=entity.modified_at.astimezone(timezone.utc),
-            created_by=entity.created_by,
-            modified_by=entity.modified_by,
-            extra_data=entity.metadata if entity.metadata else None,
+    def __init__(self, db: Session):
+        """Initialize the repository with a database session."""
+        self.db = db
+        self.db_session = db  # Alias for db for compatibility
+
+    def create(self, offer: Offer) -> Offer:
+        """Create a new offer."""
+        model = OfferModel(
+            id=str(offer.id),
+            route_id=str(offer.route_id),
+            cost_history_id=str(offer.cost_id),
+            total_cost=float(offer.total_cost),
+            margin=float(offer.margin),
+            final_price=float(offer.final_price),
+            fun_fact=offer.fun_fact,
+            status=offer.status.value,
+            is_active=offer.is_active,
+            valid_until=offer.valid_until,
+            version="1.0",
+            extra_data=offer.metadata or {},
+            created_at=datetime.now(timezone.utc),
+            modified_at=datetime.now(timezone.utc)
         )
-        self.db.add(db_offer)
-        self.db.commit()
-        self.db.refresh(db_offer)
-        
+        self.db.add(model)
+        self.db.flush()
+
         # Create initial history entry
-        self.add_history(
-            offer_id=str(entity.id),
-            version=entity.version or "1.0",
-            status=entity.status,
-            margin=float(entity.margin),
-            final_price=float(entity.final_price),
-            fun_fact=entity.fun_fact,
-            metadata=entity.metadata,
-            changed_by=entity.created_by,
-            change_reason="Initial offer creation"
+        history = self._create_history_entry(
+            offer_id=model.id,
+            version="1.0",
+            status=model.status,
+            margin=float(offer.margin),
+            final_price=float(offer.final_price),
+            fun_fact=model.fun_fact,
+            metadata=model.extra_data,
+            reason="Initial creation"
         )
-        
+        self.db.add(history)
+        self.db.commit()
+
+        return self._to_entity(model)
+
+    def get(self, id: UUID) -> Optional[Offer]:
+        """Get an offer by ID."""
+        return self.get_by_id(str(id))
+
+    def get_all(self, skip: int = 0, limit: int = 100) -> List[Offer]:
+        """Get all offers with pagination."""
+        models = self.db.query(OfferModel).offset(skip).limit(limit).all()
+        return [self._to_entity(m) for m in models]
+
+    def count(self) -> int:
+        """Get total number of offers."""
+        return self.db.query(OfferModel).count()
+
+    def get_by_id(self, id: str) -> Optional[Offer]:
+        """Get an offer by ID."""
+        db_offer = self.db.query(OfferModel).filter(OfferModel.id == str(id)).first()
+        if not db_offer:
+            return None
         return self._to_entity(db_offer)
 
-    def get_by_id(self, id: str) -> Optional[OfferEntity]:
-        """Get current version of an offer by ID."""
-        db_offer = self.db.query(OfferModel).filter(OfferModel.id == id).first()
-        return self._to_entity(db_offer) if db_offer else None
-
-    def get_version(self, id: str, version: str) -> Optional[OfferEntity]:
+    def get_version(self, offer_id: UUID, version: str) -> Optional[Offer]:
         """Get specific version of an offer."""
-        db_history = (
-            self.db.query(OfferHistoryModel)
-            .filter(
-                and_(
-                    OfferHistoryModel.offer_id == id,
-                    OfferHistoryModel.version == version
-                )
-            )
-            .first()
+        # Get the offer first to get all required fields
+        offer = self.db.query(OfferModel).filter(OfferModel.id == str(offer_id)).first()
+        if not offer:
+            raise OfferNotFoundError(f"Offer with id {offer_id} not found")
+
+        # Get the history entry for the specific version
+        history = self.db.query(OfferHistoryModel).filter(
+            OfferHistoryModel.offer_id == str(offer_id),
+            OfferHistoryModel.version == version
+        ).first()
+
+        if not history:
+            return None
+
+        # Create an offer with the historical data
+        return Offer(
+            id=UUID(history.offer_id),
+            route_id=UUID(offer.route_id),
+            cost_id=UUID(offer.cost_history_id) if offer.cost_history_id else None,
+            total_cost=Decimal(str(offer.total_cost)).quantize(Decimal('0.01')),
+            status=OfferStatus(history.status),
+            margin=Decimal(str(history.margin)).quantize(Decimal('0.0001')),
+            final_price=Decimal(str(history.final_price)).quantize(Decimal('0.01')),
+            fun_fact=history.fun_fact,
+            metadata=history.extra_data or {},
+            version=history.version,
+            created_at=offer.created_at,
+            modified_at=history.changed_at,
+            valid_until=offer.valid_until,
+            is_active=offer.is_active
         )
-        return self._history_to_entity(db_history) if db_history else None
+
+    def update(self, offer: Offer) -> Offer:
+        """Update an existing offer."""
+        db_offer = self.db.query(OfferModel).filter(OfferModel.id == str(offer.id)).first()
+        if not db_offer:
+            raise OfferNotFoundError(f"Offer with id {offer.id} not found")
+
+        # Update version
+        db_offer.version = self._increment_version(db_offer.version)
+        db_offer.modified_at = datetime.now(timezone.utc)
+
+        # Update fields
+        db_offer.status = offer.status.value
+        db_offer.margin = float(offer.margin)
+        db_offer.final_price = float(offer.final_price)
+        db_offer.fun_fact = offer.fun_fact
+        db_offer.extra_data = offer.metadata or {}
+        db_offer.is_active = offer.is_active
+        db_offer.valid_until = offer.valid_until
+
+        # Create history entry
+        history = self._create_history_entry(
+            offer_id=offer.id,
+            version=db_offer.version,
+            status=offer.status.value,
+            margin=float(offer.margin),
+            final_price=float(offer.final_price),
+            fun_fact=offer.fun_fact,
+            metadata=offer.metadata or {},
+            reason="Offer updated"
+        )
+        self.db.add(history)
+        self.db.commit()
+
+        return self._to_entity(db_offer)
+
+    def delete(self, id: str) -> bool:
+        """Delete an offer by ID."""
+        db_offer = self.db.query(OfferModel).filter(OfferModel.id == str(id)).first()
+        if not db_offer:
+            return False
+        self.db.delete(db_offer)
+        self.db.commit()
+        return True
+
+    def find_offers(
+        self,
+        route_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        page: int = 1,
+        per_page: int = 10
+    ) -> Tuple[List[Offer], int]:
+        """Find offers matching criteria."""
+        filters = {}
+        if route_id:
+            filters['route_id'] = str(route_id)
+        if status:
+            filters['status'] = status
+        if min_price:
+            filters['min_price'] = float(min_price)
+        if max_price:
+            filters['max_price'] = float(max_price)
+            
+        return self.list_with_filters(page=page, per_page=per_page, filters=filters)
+
+    def get_offer_history(self, offer_id: UUID) -> List[OfferHistory]:
+        """Get history of an offer."""
+        history_models = self.db.query(OfferHistoryModel).filter(
+            OfferHistoryModel.offer_id == str(offer_id)
+        ).order_by(OfferHistoryModel.changed_at.desc()).all()
+
+        return [self._to_history_entity(h) for h in history_models]
+
+    def get_active_offers(self) -> List[Offer]:
+        """Get all active offers."""
+        now = datetime.now(timezone.utc)
+        models = self.db.query(OfferModel).filter(
+            OfferModel.is_active == True,  # noqa
+            OfferModel.status == OfferStatus.ACTIVE.value,
+            or_(
+                OfferModel.valid_until.is_(None),
+                OfferModel.valid_until > now
+            )
+        ).all()
+
+        return [self._to_entity(m) for m in models]
+
+    def update_offer_status(
+        self,
+        offer_id: UUID,
+        status: OfferStatus,
+        reason: Optional[str] = None
+    ) -> Offer:
+        """Update offer status."""
+        model = self.db.query(OfferModel).filter(OfferModel.id == str(offer_id)).first()
+        if not model:
+            raise OfferNotFoundError(f"Offer with id {offer_id} not found")
+
+        # Update model
+        model.status = status.value
+        model.version = self._increment_version(model.version)
+        model.modified_at = datetime.now(timezone.utc)
+
+        # Create history entry
+        history = self._create_history_entry(
+            offer_id=offer_id,
+            version=model.version,
+            status=status.value,
+            margin=float(model.margin),
+            final_price=float(model.final_price),
+            fun_fact=model.fun_fact,
+            metadata=model.extra_data or {},
+            reason=reason or f"Status updated to {status.value}"
+        )
+        self.db.add(history)
+        self.db.commit()
+
+        return self._to_entity(model)
+
+    def extend_validity(
+        self,
+        offer_id: UUID,
+        new_validity_date: datetime,
+        reason: str = "Validity extended"
+    ) -> Offer:
+        """Extend offer validity."""
+        model = self.db.query(OfferModel).filter(OfferModel.id == str(offer_id)).first()
+        if not model:
+            raise OfferNotFoundError(f"Offer with id {offer_id} not found")
+
+        # Ensure new_validity_date has timezone info
+        if new_validity_date.tzinfo is None:
+            new_validity_date = new_validity_date.replace(tzinfo=timezone.utc)
+
+        # Update the version and validity date
+        model.version = self._increment_version(model.version)
+        model.valid_until = new_validity_date
+        model.modified_at = datetime.now(timezone.utc)
+
+        # Create history entry with detailed reason
+        history = self._create_history_entry(
+            offer_id=offer_id,
+            version=model.version,
+            status=model.status,
+            margin=float(model.margin),
+            final_price=float(model.final_price),
+            fun_fact=model.fun_fact,
+            metadata=model.extra_data or {},
+            reason=f"{reason} - Valid until: {new_validity_date.isoformat()}"
+        )
+        self.db.add(history)
+        self.db.commit()
+
+        return self._to_entity(model)
+
+    def get_offer_metadata(self, offer_id: UUID) -> Dict:
+        """Get offer metadata."""
+        db_offer = self._get_offer(offer_id)
+        if not db_offer:
+            raise OfferNotFoundError(f"Offer with ID {offer_id} not found")
+        return db_offer.extra_data if db_offer.extra_data else {}
+
+    def compare_versions(
+        self,
+        offer_id: UUID,
+        version1: str,
+        version2: str
+    ) -> Tuple[Optional[Offer], Optional[Offer]]:
+        """Compare two versions of an offer."""
+        v1 = self.get_version(offer_id, version1)
+        v2 = self.get_version(offer_id, version2)
+        return v1, v2
 
     def list_with_filters(
         self,
         page: int = 1,
         per_page: int = 10,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> Tuple[List[OfferEntity], int]:
-        """
-        List offers with pagination and advanced filtering.
-        
-        Args:
-            page: Page number (1-based)
-            per_page: Items per page
-            filters: Dictionary of filters:
-                - status: Offer status
-                - route_id: Route ID
-                - created_by: Creator's identifier
-                - created_after: Creation date lower bound
-                - created_before: Creation date upper bound
-                - min_price: Minimum price
-                - max_price: Maximum price
-                - metadata_search: Search within metadata
-        
-        Returns:
-            Tuple of (list of offers, total count)
-        """
+        filters: Optional[Dict] = None
+    ) -> Tuple[List[Offer], int]:
+        """List offers with filters."""
         query = self.db.query(OfferModel)
-        
-        # Apply filters
+
         if filters:
-            if filters.get('status'):
-                query = query.filter(OfferModel.status == filters['status'])
-            
-            if filters.get('route_id'):
+            if 'route_id' in filters:
                 query = query.filter(OfferModel.route_id == filters['route_id'])
-            
-            if filters.get('created_by'):
-                query = query.filter(OfferModel.created_by == filters['created_by'])
-            
-            if filters.get('created_after'):
-                query = query.filter(OfferModel.created_at >= filters['created_after'])
-            
-            if filters.get('created_before'):
-                query = query.filter(OfferModel.created_at <= filters['created_before'])
-            
-            if filters.get('min_price'):
+            if 'status' in filters:
+                query = query.filter(OfferModel.status == filters['status'])
+            if 'min_price' in filters:
                 query = query.filter(OfferModel.final_price >= filters['min_price'])
-            
-            if filters.get('max_price'):
+            if 'max_price' in filters:
                 query = query.filter(OfferModel.final_price <= filters['max_price'])
-            
-            if filters.get('metadata_search'):
-                query = query.filter(OfferModel.extra_data.contains(filters['metadata_search']))
-        
+
         # Get total count before pagination
         total = query.count()
-        
+
         # Apply pagination
-        query = query.order_by(desc(OfferModel.created_at))
         query = query.offset((page - 1) * per_page).limit(per_page)
-        
-        # Execute query
-        offers = query.all()
-        return [self._to_entity(offer) for offer in offers], total
 
-    def update(self, entity: OfferEntity) -> OfferEntity:
-        """Update an offer and create history entry."""
-        db_offer = self.db.query(OfferModel).filter(OfferModel.id == str(entity.id)).first()
-        if not db_offer:
-            return None
+        # Execute query and convert to entities
+        models = query.all()
+        offers = [self._to_entity(m) for m in models]
 
-        # Create history entry before update
-        self.add_history(
-            offer_id=str(entity.id),
-            version=db_offer.version,
-            status=db_offer.status,
-            margin=float(db_offer.margin),
-            final_price=float(db_offer.final_price),
-            fun_fact=db_offer.fun_fact,
-            metadata=db_offer.extra_data,
-            changed_by=entity.modified_by,
-            change_reason=entity.metadata.get('change_reason', 'Offer updated')
+        return offers, total
+
+    def _get_by_id(self, offer_id: UUID) -> Optional[OfferModel]:
+        """Get offer by ID."""
+        return self.db.query(OfferModel).filter(OfferModel.id == str(offer_id)).first()
+
+    def _get_offer(self, offer_id: UUID) -> Optional[OfferModel]:
+        """Get offer by ID."""
+        return self.db.query(OfferModel).filter(OfferModel.id == str(offer_id)).first()
+
+    def _to_entity(self, model: OfferModel) -> Offer:
+        """Convert model to entity."""
+        # Ensure all datetime fields have timezone info
+        valid_until = model.valid_until.replace(tzinfo=timezone.utc) if model.valid_until else None
+        created_at = model.created_at.replace(tzinfo=timezone.utc) if model.created_at else None
+        modified_at = model.modified_at.replace(tzinfo=timezone.utc) if model.modified_at else None
+
+        return Offer(
+            id=UUID(model.id),
+            route_id=UUID(model.route_id),
+            cost_id=UUID(model.cost_history_id) if model.cost_history_id else None,
+            total_cost=Decimal(str(model.total_cost)).quantize(Decimal('0.01')),
+            margin=Decimal(str(model.margin)).quantize(Decimal('0.0001')),
+            final_price=Decimal(str(model.final_price)).quantize(Decimal('0.01')),
+            fun_fact=model.fun_fact,
+            status=OfferStatus(model.status),
+            is_active=model.is_active,
+            valid_until=valid_until,
+            version=model.version,
+            metadata=model.extra_data or {},
+            created_at=created_at,
+            modified_at=modified_at
         )
 
-        # Update offer
-        update_data = {
-            "route_id": str(entity.route_id),
-            "cost_id": str(entity.cost_id),
-            "total_cost": float(entity.total_cost),
-            "margin": float(entity.margin),
-            "final_price": float(entity.final_price),
-            "fun_fact": entity.fun_fact,
-            "status": entity.status,
-            "version": entity.version,
-            "is_active": entity.is_active,
-            "modified_at": entity.modified_at.astimezone(timezone.utc),
-            "modified_by": entity.modified_by,
-            "extra_data": entity.metadata if entity.metadata else None,
-        }
+    def _to_history_entity(self, model: OfferHistoryModel) -> OfferHistory:
+        """Convert history model to domain entity."""
+        if not model:
+            return None
+            
+        # Ensure datetime fields have timezone info
+        changed_at = model.changed_at.replace(tzinfo=timezone.utc) if model.changed_at else None
 
-        for key, value in update_data.items():
-            setattr(db_offer, key, value)
+        return OfferHistory(
+            id=UUID(model.id),
+            offer_id=UUID(model.offer_id),
+            version=model.version,
+            status=OfferStatus(model.status),
+            margin=Decimal(str(model.margin)).quantize(Decimal('0.0001')),
+            final_price=Decimal(str(model.final_price)).quantize(Decimal('0.01')),
+            fun_fact=model.fun_fact,
+            metadata=model.extra_data or {},
+            changed_at=changed_at,
+            changed_by=model.changed_by,
+            change_reason=model.change_reason
+        )
 
-        self.db.commit()
-        self.db.refresh(db_offer)
-        return self._to_entity(db_offer)
-
-    def add_history(
+    def _create_history_entry(
         self,
-        offer_id: str,
+        offer_id: UUID,
         version: str,
         status: str,
         margin: float,
         final_price: float,
-        fun_fact: Optional[str],
-        metadata: Optional[Dict],
-        changed_by: Optional[str],
-        change_reason: Optional[str]
-    ) -> OfferHistoryEntity:
-        """Add a history entry for an offer."""
-        history_entry = OfferHistoryModel(
-            id=str(uuid.uuid4()),
-            offer_id=offer_id,
+        fun_fact: str,
+        metadata: Dict,
+        reason: str
+    ) -> OfferHistoryModel:
+        """Create a history entry."""
+        # Ensure metadata is JSON serializable
+        safe_metadata = {}
+        if metadata and not isinstance(metadata, MetaData):  # Skip if it's a SQLAlchemy MetaData
+            for key, value in metadata.items():
+                if isinstance(value, (str, int, float, bool, list, dict)):
+                    safe_metadata[key] = value
+
+        return OfferHistoryModel(
+            id=str(uuid4()),
+            offer_id=str(offer_id),
             version=version,
             status=status,
             margin=margin,
             final_price=final_price,
             fun_fact=fun_fact,
-            extra_data=metadata,
+            extra_data=safe_metadata,
             changed_at=datetime.now(timezone.utc),
-            changed_by=changed_by,
-            change_reason=change_reason
-        )
-        self.db.add(history_entry)
-        self.db.commit()
-        self.db.refresh(history_entry)
-        return self._history_to_entity(history_entry)
-
-    def get_history(
-        self,
-        offer_id: str,
-        page: int = 1,
-        per_page: int = 10,
-        include_metadata: bool = False
-    ) -> Tuple[List[OfferHistoryEntity], int]:
-        """
-        Get paginated history entries for an offer.
-        
-        Args:
-            offer_id: Offer ID
-            page: Page number (1-based)
-            per_page: Items per page
-            include_metadata: Whether to include metadata in results
-            
-        Returns:
-            Tuple of (list of history entries, total count)
-        """
-        query = (
-            self.db.query(OfferHistoryModel)
-            .filter(OfferHistoryModel.offer_id == offer_id)
-            .order_by(desc(OfferHistoryModel.changed_at))
-        )
-        
-        # Get total count
-        total = query.count()
-        
-        # Apply pagination
-        query = query.offset((page - 1) * per_page).limit(per_page)
-        
-        # Execute query
-        history_entries = query.all()
-        return [self._history_to_entity(entry) for entry in history_entries], total
-
-    def compare_versions(
-        self,
-        offer_id: str,
-        version1: str,
-        version2: str
-    ) -> Tuple[Optional[OfferHistoryEntity], Optional[OfferHistoryEntity]]:
-        """
-        Compare two versions of an offer.
-        
-        Args:
-            offer_id: Offer ID
-            version1: First version to compare
-            version2: Second version to compare
-            
-        Returns:
-            Tuple of (version1 entry, version2 entry)
-        """
-        entries = (
-            self.db.query(OfferHistoryModel)
-            .filter(
-                and_(
-                    OfferHistoryModel.offer_id == offer_id,
-                    or_(
-                        OfferHistoryModel.version == version1,
-                        OfferHistoryModel.version == version2
-                    )
-                )
-            )
-            .order_by(OfferHistoryModel.version)
-            .all()
-        )
-        
-        if len(entries) != 2:
-            return None, None
-            
-        return (
-            self._history_to_entity(entries[0]),
-            self._history_to_entity(entries[1])
+            changed_by="system",
+            change_reason=reason
         )
 
-    def get(self, id: str) -> Optional[OfferEntity]:
-        """Get entity by ID."""
-        return self.get_by_id(id)
-
-    def get_all(self, skip: int = 0, limit: int = 100) -> List[OfferEntity]:
-        """Get all entities with pagination."""
-        db_offers = (
-            self.db.query(OfferModel)
-            .order_by(desc(OfferModel.created_at))
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-        return [self._to_entity(offer) for offer in db_offers]
-
-    def delete(self, id: str) -> bool:
-        """Delete an entity."""
-        db_offer = self.db.query(OfferModel).filter(OfferModel.id == id).first()
-        if db_offer:
-            self.db.delete(db_offer)
-            self.db.commit()
-            return True
-        return False
-
-    def _to_entity(self, db_offer: OfferModel) -> OfferEntity:
-        """Convert database model to domain entity."""
-        if not db_offer:
-            return None
-            
-        return OfferEntity(
-            id=uuid.UUID(db_offer.id),
-            route_id=uuid.UUID(db_offer.route_id),
-            cost_id=uuid.UUID(db_offer.cost_id),
-            total_cost=Decimal(str(db_offer.total_cost)),
-            margin=Decimal(str(db_offer.margin)),
-            final_price=Decimal(str(db_offer.final_price)),
-            fun_fact=db_offer.fun_fact,
-            status=db_offer.status,
-            version=db_offer.version,
-            is_active=db_offer.is_active,
-            created_at=db_offer.created_at.replace(tzinfo=timezone.utc),
-            modified_at=db_offer.modified_at.replace(tzinfo=timezone.utc),
-            created_by=db_offer.created_by,
-            modified_by=db_offer.modified_by,
-            metadata=db_offer.extra_data
-        )
-
-    def _history_to_entity(self, db_history: OfferHistoryModel) -> OfferHistoryEntity:
-        """Convert history model to domain entity."""
-        if not db_history:
-            return None
-            
-        return OfferHistoryEntity(
-            id=uuid.UUID(db_history.id),
-            offer_id=uuid.UUID(db_history.offer_id),
-            version=db_history.version,
-            status=db_history.status,
-            margin=Decimal(str(db_history.margin)),
-            final_price=Decimal(str(db_history.final_price)),
-            fun_fact=db_history.fun_fact,
-            metadata=db_history.extra_data,
-            changed_at=db_history.changed_at.replace(tzinfo=timezone.utc),
-            changed_by=db_history.changed_by,
-            change_reason=db_history.change_reason
-        )
+    def _increment_version(self, current_version: str) -> str:
+        """Increment version number with fixed precision."""
+        version_num = float(current_version)
+        return f"{version_num + 0.1:.1f}"
