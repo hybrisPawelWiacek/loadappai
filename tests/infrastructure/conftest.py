@@ -15,23 +15,32 @@ from src.infrastructure.database import Base
 @pytest.fixture(scope="session", autouse=True)
 def test_settings():
     """Create test settings."""
-    test_settings = Settings(
-        ENV="testing",  
-        DATABASE_URL="sqlite:///:memory:",
-        SQL_ECHO=False,
-        GOOGLE_MAPS_API_KEY="test_google_maps_key",
-        OPENAI_API_KEY="test_openai_key",
-        FLASK_PORT=5001,  
-        STREAMLIT_PORT=8501,
-        FLASK_ENV="testing",
-        DEBUG=True,
-        ENABLE_OPENAI=False,
-        ENABLE_GOOGLE_MAPS=False,
-        DEFAULT_CURRENCY="EUR",
-        DEFAULT_COUNTRY="DE",
-    )
-    with patch("src.settings.get_settings", return_value=test_settings):
-        yield test_settings
+    with patch.dict('os.environ', {}, clear=True):  # Clear all env vars
+        test_settings = Settings(
+            _env_file=None,  # Disable .env file loading
+            env="testing",  
+            database_url="sqlite:///:memory:",
+            sql_echo=False,
+            openai_api_key="test_openai_key",
+            google_maps_api_key=None,  # Set to None to ensure we're not using legacy setting
+            openai_model="gpt-4o-mini",
+            openai_max_retries=3,
+            openai_retry_delay=1.0,
+            openai_timeout=60.0,
+            gmaps_max_retries=3,
+            gmaps_retry_delay=1.0,
+            gmaps_cache_ttl=3600,
+            flask_port=5001,  
+            streamlit_port=8501,
+            flask_env="testing",
+            debug=True,
+            enable_openai=True,
+            enable_google_maps=False,
+            default_currency="EUR",
+            default_country="DE",
+        )
+        with patch("src.settings.Settings", return_value=test_settings):
+            yield test_settings
 
 
 @pytest.fixture(scope="session")

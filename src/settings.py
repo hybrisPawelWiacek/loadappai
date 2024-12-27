@@ -23,12 +23,12 @@ class DatabaseSettings(BaseModel):
 
 class APISettings(BaseModel):
     """External API settings."""
-    openai_key: Optional[SecretStr] = Field(
+    openai_api_key: Optional[SecretStr] = Field(
         default=None,
         description="OpenAI API key for AI services"
     )
     openai_model: str = Field(
-        default="gpt-4-mini",
+        default="gpt-4o-mini",
         description="OpenAI model to use"
     )
     openai_max_retries: int = Field(
@@ -38,6 +38,10 @@ class APISettings(BaseModel):
     openai_retry_delay: float = Field(
         default=1.0,
         description="Delay between retries for OpenAI API calls"
+    )
+    openai_timeout: float = Field(
+        default=60.0,
+        description="Timeout for OpenAI API calls in seconds"
     )
     google_maps_key: Optional[SecretStr] = Field(
         default=None,
@@ -53,7 +57,7 @@ class APISettings(BaseModel):
     )
     gmaps_cache_ttl: int = Field(
         default=3600,
-        description="TTL for Google Maps API cache in seconds"
+        description="Cache TTL for Google Maps API responses"
     )
 
 
@@ -122,6 +126,41 @@ class Settings(BaseSettings):
         alias="GOOGLE_MAPS_API_KEY",
         description="Google Maps API key"
     )
+    openai_model: str = Field(
+        default="gpt-4o-mini",
+        alias="OPENAI_MODEL",
+        description="OpenAI model to use"
+    )
+    openai_max_retries: int = Field(
+        default=3,
+        alias="OPENAI_MAX_RETRIES",
+        description="Maximum number of retries for OpenAI API calls"
+    )
+    openai_retry_delay: float = Field(
+        default=1.0,
+        alias="OPENAI_RETRY_DELAY",
+        description="Delay between retries for OpenAI API calls"
+    )
+    openai_timeout: float = Field(
+        default=60.0,
+        alias="OPENAI_TIMEOUT",
+        description="Timeout for OpenAI API calls in seconds"
+    )
+    gmaps_max_retries: int = Field(
+        default=3,
+        alias="GMAPS_MAX_RETRIES",
+        description="Maximum number of retries for Google Maps API calls"
+    )
+    gmaps_retry_delay: float = Field(
+        default=1.0,
+        alias="GMAPS_RETRY_DELAY",
+        description="Delay between retries for Google Maps API calls"
+    )
+    gmaps_cache_ttl: int = Field(
+        default=3600,
+        alias="GMAPS_CACHE_TTL",
+        description="Cache TTL for Google Maps API responses"
+    )
 
     # Service settings
     flask_port: int = Field(
@@ -156,17 +195,16 @@ class Settings(BaseSettings):
     @property
     def api(self) -> APISettings:
         """Get API settings."""
-        openai_key = None
-        if self.openai_api_key and self.openai_api_key.strip():
-            openai_key = SecretStr(self.openai_api_key)
-
-        google_maps_key = None
-        if self.google_maps_api_key and self.google_maps_api_key.strip():
-            google_maps_key = SecretStr(self.google_maps_api_key)
-
         return APISettings(
-            openai_key=openai_key,
-            google_maps_key=google_maps_key
+            openai_api_key=SecretStr(self.openai_api_key) if self.openai_api_key else None,
+            openai_model=self.openai_model,
+            openai_max_retries=self.openai_max_retries,
+            openai_retry_delay=self.openai_retry_delay,
+            openai_timeout=self.openai_timeout,
+            google_maps_key=SecretStr(self.google_maps_api_key) if self.google_maps_api_key else None,
+            gmaps_max_retries=self.gmaps_max_retries,
+            gmaps_retry_delay=self.gmaps_retry_delay,
+            gmaps_cache_ttl=self.gmaps_cache_ttl
         )
 
     @property

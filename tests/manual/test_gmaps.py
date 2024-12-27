@@ -4,17 +4,22 @@ import os
 from pathlib import Path
 
 # Add the project root to Python path
-project_root = str(Path(__file__).parent.parent)
+project_root = str(Path(__file__).parent.parent.parent)
 sys.path.append(project_root)
 
 from src.infrastructure.services.google_maps_service import GoogleMapsService
 from src.domain.value_objects import Location
+from tests.manual.test_utils import load_env, get_required_env
 
 def main():
     """Test Google Maps service functionality."""
     try:
+        # Load environment variables
+        load_env()
+        api_key = get_required_env("GOOGLE_MAPS_API_KEY")
+        
         # Initialize the service
-        service = GoogleMapsService()
+        service = GoogleMapsService(api_key=api_key)
         print("Service initialized successfully")
 
         # Test locations
@@ -30,9 +35,18 @@ def main():
         )
         
         print("\nTesting route from Warsaw to Berlin...")
-        segments = service.get_country_segments(warsaw, berlin, transport_type="truck")
         
+        # Test distance calculation
+        distance = service.calculate_distance(warsaw, berlin)
+        print(f"\nDriving distance: {distance:.2f} km")
+        
+        # Test duration calculation
+        duration = service.calculate_duration(warsaw, berlin)
+        print(f"Estimated duration: {duration:.2f} hours")
+        
+        # Test route segmentation
         print("\nRoute segments:")
+        segments = service.get_route_segments(warsaw, berlin, include_tolls=True)
         for segment in segments:
             print(f"Country: {segment.country_code}, Distance: {segment.distance:.2f} km")
             if segment.toll_rates:

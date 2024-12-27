@@ -17,6 +17,7 @@ class CountrySegment(BaseValueObject):
     toll_rates: Dict[str, Decimal] = Field(
         default_factory=lambda: {"highway": Decimal("0.15"), "national": Decimal("0.10")}
     )
+    has_tolls: bool = Field(default=False, description="Whether this segment has toll roads")
 
     @field_validator("country_code")
     def validate_country_code(cls, v: str) -> str:

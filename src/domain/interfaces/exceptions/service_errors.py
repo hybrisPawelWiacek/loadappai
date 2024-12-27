@@ -51,13 +51,15 @@ class ServiceError(Exception):
         message: Error description
         code: Error code for categorization
         details: Additional error context
+        original_error: The original exception that caused this error
     """
     
     def __init__(
         self,
         message: str,
         code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
     ):
         """Initialize service error.
         
@@ -65,11 +67,22 @@ class ServiceError(Exception):
             message: Error description
             code: Optional error code
             details: Optional error details
+            original_error: Optional original exception
         """
         super().__init__(message)
         self.message = message
         self.code = code
         self.details = details or {}
+        self.original_error = original_error
+
+    def __str__(self) -> str:
+        """String representation of the error."""
+        error_str = self.message
+        if self.code:
+            error_str = f"[{self.code}] {error_str}"
+        if self.original_error:
+            error_str = f"{error_str} (Original error: {str(self.original_error)})"
+        return error_str
 
 class LocationServiceError(ServiceError):
     """Exception raised for errors in the location service."""
@@ -78,7 +91,8 @@ class LocationServiceError(ServiceError):
         self,
         message: str,
         code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
     ):
         """Initialize location service error.
         
@@ -86,11 +100,13 @@ class LocationServiceError(ServiceError):
             message: Error description
             code: Optional error code
             details: Optional error details
+            original_error: Optional original exception
         """
         super().__init__(
             message,
             code=code,
-            details=details
+            details=details,
+            original_error=original_error
         )
 
 class AIServiceError(ServiceError):
@@ -100,7 +116,8 @@ class AIServiceError(ServiceError):
         self,
         message: str,
         code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
     ):
         """Initialize AI service error.
         
@@ -108,11 +125,13 @@ class AIServiceError(ServiceError):
             message: Error description
             code: Optional error code
             details: Optional error details
+            original_error: Optional original exception
         """
         super().__init__(
             message,
             code=code,
-            details=details
+            details=details,
+            original_error=original_error
         )
 
 class CostServiceError(ServiceError):
@@ -122,7 +141,8 @@ class CostServiceError(ServiceError):
         self,
         message: str,
         code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
     ):
         """Initialize cost service error.
         
@@ -130,11 +150,13 @@ class CostServiceError(ServiceError):
             message: Error description
             code: Optional error code
             details: Optional error details
+            original_error: Optional original exception
         """
         super().__init__(
             message,
             code=code,
-            details=details
+            details=details,
+            original_error=original_error
         )
 
 class OfferServiceError(ServiceError):
@@ -144,7 +166,8 @@ class OfferServiceError(ServiceError):
         self,
         message: str,
         code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
     ):
         """Initialize offer service error.
         
@@ -152,9 +175,11 @@ class OfferServiceError(ServiceError):
             message: Error description
             code: Optional error code
             details: Optional error details
+            original_error: Optional original exception
         """
         super().__init__(
             message,
             code=code,
-            details=details
+            details=details,
+            original_error=original_error
         )

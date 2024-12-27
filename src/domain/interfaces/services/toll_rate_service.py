@@ -200,12 +200,30 @@ class TollRateService(ABC):
             List of historical changes
             
         Raises:
-            TollRateServiceError: If history not found
+            TollRateServiceError: If history retrieval fails
             
         Implementation Notes:
             - Must validate dates
-            - Should handle pagination
-            - Must track changes
-            - Should include metadata
+            - Should handle timezones
+            - Must track access
+            - Should cache results
+        """
+        pass
+
+    @abstractmethod
+    def has_toll_roads(self, country_code: str) -> bool:
+        """Check if a country has toll roads.
+        
+        Args:
+            country_code: ISO country code
+            
+        Returns:
+            True if country has toll roads, False otherwise
+            
+        Implementation Notes:
+            - Must validate country code
+            - Should cache results
+            - Must handle updates
+            - Should track access
         """
         pass

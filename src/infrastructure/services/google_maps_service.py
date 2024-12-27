@@ -13,31 +13,35 @@ from src.domain.value_objects import Location, CountrySegment
 from src.domain.interfaces.services.location_service import LocationService, LocationServiceError
 from src.infrastructure.logging import get_logger
 from src.settings import get_settings
+from src.infrastructure.services.toll_rate_service import DefaultTollRateService
 
 logger = get_logger()
 
 class GoogleMapsService(LocationService):
     """Google Maps API implementation of LocationService."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, toll_rate_service: Optional[DefaultTollRateService] = None):
         """
         Initialize the Google Maps service.
 
         Args:
-            api_key: Optional API key (defaults to settings.GOOGLE_MAPS_API_KEY)
+            api_key: Optional API key (defaults to settings.google_maps_api_key)
+            toll_rate_service: Optional toll rate service (defaults to DefaultTollRateService)
 
         Raises:
             LocationServiceError: If API key is not found in settings or environment
         """
         self._logger = logger.bind(service="google_maps")
         settings = get_settings()
-        self.api_key = api_key or settings.GOOGLE_MAPS_API_KEY
+        self.api_key = api_key or settings.google_maps_api_key
         if not self.api_key:
             raise LocationServiceError("Google Maps API key not found in settings or environment")
         
-        self.max_retries = settings.GMAPS_MAX_RETRIES
-        self.retry_delay = settings.GMAPS_RETRY_DELAY
-        self.cache_ttl = settings.GMAPS_CACHE_TTL
+        # Get API settings
+        api_settings = settings.api
+        self.max_retries = api_settings.gmaps_max_retries
+        self.retry_delay = api_settings.gmaps_retry_delay
+        self.cache_ttl = api_settings.gmaps_cache_ttl
         
         try:
             self.client = googlemaps.Client(key=self.api_key)
@@ -46,7 +50,8 @@ class GoogleMapsService(LocationService):
             self._logger.error("Failed to initialize Google Maps client", error=str(e))
             raise LocationServiceError(f"Failed to initialize Google Maps client: {str(e)}")
         
-        self.toll_rate_service = DefaultTollRateService()
+        # Initialize toll rate service
+        self.toll_rate_service = toll_rate_service or DefaultTollRateService()
 
     def _make_request(self, request_func: callable, *args, **kwargs) -> Dict[str, Any]:
         """
@@ -183,8 +188,21 @@ class GoogleMapsService(LocationService):
         }
         return country_codes.get(country, country)
 
-    def get_country_segments(self, origin: Location, destination: Location) -> List[CountrySegment]:
-        """Get country segments for the route."""
+    def get_route_segments(self, origin: Location, destination: Location, include_tolls: bool = False) -> List[CountrySegment]:
+        """
+        Get route segments for a route.
+        
+        Args:
+            origin: Starting location
+            destination: End location
+            include_tolls: Whether to include toll information
+            
+        Returns:
+            List of country segments with distances
+            
+        Raises:
+            LocationServiceError: If segment calculation fails
+        """
         logger = get_logger(__name__).bind(
             origin=origin.dict(),
             destination=destination.dict()
@@ -200,152 +218,125 @@ class GoogleMapsService(LocationService):
             total_distance = Decimal(str(self.calculate_distance(origin, destination)))
             total_duration = Decimal(str(self.calculate_duration(origin, destination)))
             
-            # Get country codes for origin and destination
-            origin_country = self._get_country_code(origin)
-            dest_country = self._get_country_code(destination)
+            # Process route steps
+            segments = []
+            current_country = None
+            current_distance = Decimal('0')
+            current_duration = Decimal('0')
             
-            if not origin_country or not dest_country:
-                raise LocationServiceError("Could not determine country codes")
+            if not route_data[0].get('legs', []):
+                raise LocationServiceError("Invalid route data: no legs found")
+                
+            for leg in route_data[0]['legs']:
+                for step in leg.get('steps', []):
+                    # Get location details
+                    end_location = step['end_location']
+                    result = self._make_request(
+                        self.client.reverse_geocode,
+                        (end_location['lat'], end_location['lng'])
+                    )
+                    
+                    if not result:
+                        continue
+                        
+                    # Extract country from geocoding result
+                    country = None
+                    for component in result[0]['address_components']:
+                        if 'country' in component['types']:
+                            country = component['long_name']
+                            break
+                    
+                    if not country:
+                        continue
+                        
+                    # Convert distance to kilometers and duration to hours
+                    step_distance = Decimal(str(step['distance']['value'])) / Decimal('1000')
+                    step_duration = Decimal(str(step['duration']['value'])) / Decimal('3600')  # Convert seconds to hours
+                    
+                    if current_country != country:
+                        if current_country:
+                            # Add completed segment
+                            segments.append(CountrySegment(
+                                country_code=self.get_country_code(current_country),
+                                distance=current_distance,
+                                duration_hours=current_duration,
+                                has_tolls=self._check_for_tolls(current_country) if include_tolls else False
+                            ))
+                        # Start new segment
+                        current_country = country
+                        current_distance = step_distance
+                        current_duration = step_duration
+                    else:
+                        current_distance += step_distance
+                        current_duration += step_duration
             
-            # If same country, return single segment
-            if origin_country == dest_country:
-                toll_rates = self.get_toll_rates(origin_country, "truck")
-                return [CountrySegment(
-                    country_code=origin_country,
-                    distance=total_distance,
-                    duration_hours=total_duration,
-                    toll_rates=toll_rates
-                )]
-            
-            # For different countries, analyze route steps to determine country transition
-            steps = route_data[0]['legs'][0]['steps']
-            transition_point = None
-            
-            # Find the step where we cross the border
-            for i, step in enumerate(steps):
-                step_location = Location(
-                    latitude=step['end_location']['lat'],
-                    longitude=step['end_location']['lng'],
-                    address=""  # We don't need the address for this check
-                )
-                country_code = self._get_country_code(step_location)
-                if country_code and country_code != origin_country:
-                    transition_point = i
-                    break
-            
-            if transition_point is None:
-                # If we can't find the exact transition, split 60/40 based on typical routes
-                if origin_country == "PL" and dest_country == "DE":
-                    origin_ratio = Decimal("0.6")
-                elif origin_country == "DE" and dest_country == "PL":
-                    origin_ratio = Decimal("0.4")
-                else:
-                    origin_ratio = Decimal("0.5")
-            else:
-                # Calculate the ratio based on the transition point
-                distance_to_transition = sum(step['distance']['value'] for step in steps[:transition_point])
-                origin_ratio = Decimal(str(distance_to_transition)) / Decimal(str(sum(step['distance']['value'] for step in steps)))
-            
-            # Calculate segment distances and durations
-            origin_distance = total_distance * origin_ratio
-            dest_distance = total_distance * (1 - origin_ratio)
-            origin_duration = total_duration * origin_ratio
-            dest_duration = total_duration * (1 - origin_ratio)
-            
-            # Get toll rates
-            origin_toll_rates = self.get_toll_rates(origin_country, "truck")
-            dest_toll_rates = self.get_toll_rates(dest_country, "truck")
-            
-            logger.info("Creating country segments", 
-                       origin_distance=float(origin_distance),
-                       dest_distance=float(dest_distance),
-                       origin_duration=float(origin_duration),
-                       dest_duration=float(dest_duration))
-            
-            # Create segments
-            segments = [
-                CountrySegment(
-                    country_code=origin_country,
-                    distance=origin_distance,
-                    duration_hours=origin_duration,
-                    toll_rates=origin_toll_rates
-                ),
-                CountrySegment(
-                    country_code=dest_country,
-                    distance=dest_distance,
-                    duration_hours=dest_duration,
-                    toll_rates=dest_toll_rates
-                )
-            ]
+            # Add final segment
+            if current_country:
+                segments.append(CountrySegment(
+                    country_code=self.get_country_code(current_country),
+                    distance=current_distance,
+                    duration_hours=current_duration,
+                    has_tolls=self._check_for_tolls(current_country) if include_tolls else False
+                ))
             
             return segments
             
         except Exception as e:
-            logger.error("Error getting country segments", error=str(e))
-            raise LocationServiceError(f"Failed to get country segments: {str(e)}")
+            logger.error("Failed to get route segments", error=str(e))
+            raise LocationServiceError(f"Failed to get route segments: {str(e)}")
 
-    def _get_country_code(self, location: Location) -> Optional[str]:
-        """Get country code for a location."""
-        try:
-            location_data = self._make_request(
-                self.client.reverse_geocode,
-                (location.latitude, location.longitude)
-            )
-            
-            if location_data:
-                for component in location_data[0]['address_components']:
-                    if 'country' in component['types']:
-                        return component['short_name']
-            return None
-        except Exception as e:
-            self._logger.error("Error getting country code",
-                             error=str(e),
-                             lat=location.latitude,
-                             lng=location.longitude)
-            return None
-
-    def validate_location(self, location: Location) -> None:
-        """Validate a location using Google Maps Geocoding API."""
-        self._logger.info("Validating location", location=location.dict())
+    def validate_location(self, location: Location) -> bool:
+        """
+        Validate a location using Google Maps Geocoding API.
         
+        Args:
+            location: Location to validate
+            
+        Returns:
+            True if location is valid, False otherwise
+            
+        Raises:
+            LocationServiceError: If validation fails
+        """
         try:
+            # Try to geocode the location
             result = self._make_request(
                 self.client.geocode,
-                (location.latitude, location.longitude)
+                location.address if location.address else f"{location.latitude},{location.longitude}"
             )
+            
+            # Check if we got any results
             if not result:
-                raise LocationServiceError("Invalid location: no results found")
+                self._logger.warning("Location not found", location=location.dict())
+                return False
+                
+            # Verify the result has the expected components
+            if not result[0].get('geometry') or not result[0].get('formatted_address'):
+                self._logger.warning("Invalid location data", location=location.dict())
+                return False
+                
+            # Check if the coordinates match (if provided)
+            if location.latitude and location.longitude:
+                result_lat = result[0]['geometry']['location']['lat']
+                result_lng = result[0]['geometry']['location']['lng']
+                
+                # Allow for small differences in coordinates (approx 100m)
+                lat_diff = abs(location.latitude - result_lat)
+                lng_diff = abs(location.longitude - result_lng)
+                if lat_diff > 0.001 or lng_diff > 0.001:
+                    self._logger.warning(
+                        "Location coordinates mismatch",
+                        original=location.dict(),
+                        found={"lat": result_lat, "lng": result_lng}
+                    )
+                    return False
+            
+            return True
+            
         except Exception as e:
-            self._logger.error("Location validation failed", error=str(e))
+            self._logger.error("Location validation failed", error=str(e), location=location.dict())
             raise LocationServiceError(f"Location validation failed: {str(e)}")
 
-        self._logger.info("Location validated successfully")
-
-    def get_toll_rates(self, country: str, vehicle_type: str = "truck") -> Dict[str, Decimal]:
-        """Get toll rates for a country and vehicle type."""
-        # Default toll rates
-        rates = {
-            "PL": {
-                "truck": {
-                    "highway": Decimal("0.15"),  # €/km for highways
-                    "national": Decimal("0.10"),  # €/km for national roads
-                }
-            },
-            "DE": {
-                "truck": {
-                    "highway": Decimal("0.17"),  # €/km for highways
-                    "national": Decimal("0.12"),  # €/km for national roads
-                }
-            }
-        }
-        
-        # Get rates for the country and vehicle type
-        country_rates = rates.get(country, {}).get(vehicle_type, {})
-        if not country_rates:
-            # Use default rates if not found
-            country_rates = {
-                "highway": Decimal("0.15"),  # Default highway rate
-                "national": Decimal("0.10"),  # Default national rate
-            }
-        
-        return country_rates
+    def _check_for_tolls(self, country: str) -> bool:
+        """Check if a country has toll roads."""
+        return self.toll_rate_service.has_toll_roads(self.get_country_code(country))
